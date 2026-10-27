@@ -20,16 +20,16 @@ function seed(): { chikiId: string; aquaId: string; cashierId: string } {
     name: 'Chiki Jagung',
     price: 5000,
     stock: 20,
-    min_stock: 5,
     is_active: true,
+    category_id: null,
   });
   const aqua = createProduct(db, {
     barcode: '8992761110017',
     name: 'Aqua 600ml',
     price: 3000,
     stock: 48,
-    min_stock: 5,
     is_active: true,
+    category_id: null,
   });
   insertStudents(db, [
     { className: 'XIPM', nis: '12777', nisn: '0103133511', name: 'AIDA ZULFA KHASNA', gender: 'P' },

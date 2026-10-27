@@ -1,5 +1,7 @@
 // Registrasi seluruh IPC handler — satu-satunya jalan renderer -> data (PRD §5.4).
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow, app } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
 import type { DB } from '../db/database';
 import type {
   CartItemInput,
@@ -9,19 +11,29 @@ import type {
   ProductInput,
   TopProduct,
   TrendPoint,
+  ReportMode,
+  ReceiptData,
+  ReceiptItemLine,
 } from '@shared/types';
 import * as products from '../db/repositories/products';
 import * as students from '../db/repositories/students';
 import * as attendance from '../db/repositories/attendance';
 import * as settingsRepo from '../db/repositories/settings';
+import * as categoriesRepo from '../db/repositories/categories';
+import * as opnameRepo from '../db/repositories/opname';
+import * as reportsRepo from '../db/repositories/reports';
 import { createTransaction } from '../db/repositories/transactions';
 import { getSyncStatusInfo } from '../db/repositories/syncLog';
 import { parseStudentsCsv } from '../csv/importStudents';
 import { runBackup, listBackups } from '../db/backup';
-import { localDate, daysAgo, dateRange } from '../util/time';
+import { localDate, daysAgo, dateRange, toIsoLocal } from '../util/time';
 import { encryptSecret, encryptionAvailable, decryptSecret } from '../util/secret';
 import { buildSheetsClient, extractSpreadsheetId, validateCredentialJson } from '../sync/google';
 import { resetFailedBackoff } from '../sync/sheetsSync';
+import { buildReceiptHtml } from '../util/receipt';
+import { importDummyBundle, validateBundle } from '../db/repositories/dummyImport';
+import { weekRange, monthRange } from '@shared/period';
+import { computeOpnameReminder } from '@shared/opname';
 import type { SyncManager } from '../sync/scheduler';
 import log from 'electron-log/main';
 
@@ -59,15 +71,28 @@ function dashboardCards(db: DB): DashboardCards {
 function dashboardTrend(db: DB, days: number): TrendPoint[] {
   const start = daysAgo(days);
   const end = localDate();
-  const rows = db
+  const revRows = db
     .prepare(
       `SELECT substr(sold_at, 1, 10) AS d, COALESCE(SUM(total), 0) AS revenue
        FROM transactions WHERE substr(sold_at, 1, 10) >= ? AND substr(sold_at, 1, 10) <= ?
        GROUP BY d`,
     )
     .all(start, end) as { d: string; revenue: number }[];
-  const map = new Map(rows.map((r) => [r.d, r.revenue]));
-  return dateRange(start, end).map((d) => ({ date: d, revenue: map.get(d) ?? 0 }));
+  const qtyRows = db
+    .prepare(
+      `SELECT substr(t.sold_at, 1, 10) AS d, SUM(ti.qty) AS qty
+       FROM transaction_items ti JOIN transactions t ON t.id = ti.transaction_id
+       WHERE substr(t.sold_at, 1, 10) >= ? AND substr(t.sold_at, 1, 10) <= ?
+       GROUP BY d`,
+    )
+    .all(start, end) as { d: string; qty: number }[];
+  const revMap = new Map(revRows.map((r) => [r.d, r.revenue]));
+  const qtyMap = new Map(qtyRows.map((r) => [r.d, r.qty]));
+  return dateRange(start, end).map((d) => ({
+    date: d,
+    revenue: revMap.get(d) ?? 0,
+    qty: qtyMap.get(d) ?? 0,
+  }));
 }
 
 function dashboardTop(db: DB, days: number, by: 'qty' | 'revenue'): TopProduct[] {
@@ -103,6 +128,85 @@ function dashboardHourly(db: DB, days: number): HourPoint[] {
   }));
 }
 
+/** Distribusi penjualan per kategori (produk tanpa kategori = "Tanpa Kategori"). */
+function dashboardByCategory(db: DB, days: number): { category: string; qty: number; revenue: number }[] {
+  const start = daysAgo(days);
+  return db
+    .prepare(
+      `SELECT COALESCE(c.name, 'Tanpa Kategori') AS category,
+              SUM(ti.qty) AS qty,
+              SUM(ti.subtotal) AS revenue
+       FROM transaction_items ti
+       JOIN transactions t ON t.id = ti.transaction_id
+       LEFT JOIN products p ON p.id = ti.product_id
+       LEFT JOIN categories c ON c.id = p.category_id
+       WHERE substr(t.sold_at, 1, 10) >= ?
+       GROUP BY category
+       ORDER BY revenue DESC`,
+    )
+    .all(start) as { category: string; qty: number; revenue: number }[];
+}
+
+/** Statistik pemusatan periode: mean omzet harian = total omzet / jumlah hari kalender. */
+function dashboardStats(db: DB, days: number): {
+  mean_daily_revenue: number;
+  total_revenue: number;
+  total_qty: number;
+  days: number;
+} {
+  const start = daysAgo(days);
+  const end = localDate();
+  const range = dateRange(start, end);
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(total), 0) AS revenue FROM transactions
+       WHERE substr(sold_at, 1, 10) >= ? AND substr(sold_at, 1, 10) <= ?`,
+    )
+    .get(start, end) as { revenue: number };
+  const qty = db
+    .prepare(
+      `SELECT COALESCE(SUM(ti.qty), 0) AS q
+       FROM transaction_items ti JOIN transactions t ON t.id = ti.transaction_id
+       WHERE substr(t.sold_at, 1, 10) >= ? AND substr(t.sold_at, 1, 10) <= ?`,
+    )
+    .get(start, end) as { q: number };
+  const dayCount = Math.max(range.length, 1);
+  return {
+    mean_daily_revenue: Math.round(row.revenue / dayCount),
+    total_revenue: row.revenue,
+    total_qty: qty.q,
+    days: dayCount,
+  };
+}
+
+/** Nama siswa yang absen pada tanggal tsb — sumber "kasir jaga" di struk. */
+function cashierNamesFor(db: DB, date: string): string[] {
+  return attendance.listAttendanceByDate(db, date).map((a) => a.name);
+}
+
+/** Path logo sekolah: dev = <root>/resources; packaged = process.resourcesPath (extraResources). */
+function logoPath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'logo-sekolah.webp');
+  return path.join(app.getAppPath(), 'resources', 'logo-sekolah.webp');
+}
+
+function logoDataUri(): string | null {
+  try {
+    const file = logoPath();
+    if (!fs.existsSync(file)) return null;
+    return `data:image/webp;base64,${fs.readFileSync(file).toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Rentang tanggal laporan dari mode + anchor ('2026-01-05' | '2026-01'). */
+function reportRange(mode: ReportMode, anchor: string): { start: string; end: string } {
+  if (mode === 'bulanan') return monthRange(anchor.slice(0, 7));
+  if (mode === 'mingguan') return weekRange(anchor);
+  return { start: anchor.slice(0, 10), end: anchor.slice(0, 10) };
+}
+
 function existingNisns(db: DB): Set<string> {
   const rows = db.prepare('SELECT nisn FROM students').all() as { nisn: string }[];
   return new Set(rows.map((r) => r.nisn));
@@ -126,6 +230,14 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle('products:byBarcode', (_e, barcode: string) =>
     products.getProductByBarcode(db, barcode),
   );
+
+  // ---------- Kategori (v1.0.1) ----------
+  ipcMain.handle('categories:list', () => categoriesRepo.listCategories(db));
+  ipcMain.handle('categories:create', (_e, name: string) => categoriesRepo.createCategory(db, name));
+  ipcMain.handle('categories:update', (_e, id: string, name: string) =>
+    categoriesRepo.renameCategory(db, id, name),
+  );
+  ipcMain.handle('categories:delete', (_e, id: string) => categoriesRepo.deleteCategory(db, id));
 
   // ---------- Label barcode (HTML dari renderer, SVG Code 128 sudah jadi) ----------
   ipcMain.handle('labels:print', async (_e, html: string, labelCount: number) => {
@@ -184,6 +296,7 @@ export function registerIpc(ctx: IpcContext): void {
   });
   ipcMain.handle('attendance:today', () => attendance.listAttendanceByDate(db, localDate()));
   ipcMain.handle('attendance:byDate', (_e, date: string) => attendance.listAttendanceByDate(db, date));
+  ipcMain.handle('attendance:recap', (_e, month: string) => attendance.recapByMonth(db, month));
   ipcMain.handle('attendance:setActiveCashier', (_e, studentId: string | null) => {
     settingsRepo.setSetting(db, 'active_cashier_student_id', studentId ?? '');
   });
@@ -195,6 +308,43 @@ export function registerIpc(ctx: IpcContext): void {
   // ---------- Transaksi ----------
   ipcMain.handle('transactions:create', (_e, items: CartItemInput[]) => createTransaction(db, items));
 
+  // ---------- Struk thermal (v1.0.1) ----------
+  ipcMain.handle('transactions:items', (_e, transactionId: string): ReceiptItemLine[] => {
+    const items = db
+      .prepare(
+        `SELECT product_name AS name, qty, price, subtotal
+         FROM transaction_items WHERE transaction_id = ? ORDER BY id`,
+      )
+      .all(transactionId) as ReceiptItemLine[];
+    return items;
+  });
+  ipcMain.handle('receipts:print', async (_e, transactionId: string) => {
+    const tx = db
+      .prepare('SELECT code, total, item_count, sold_at FROM transactions WHERE id = ?')
+      .get(transactionId) as { code: string; total: number; item_count: number; sold_at: string } | undefined;
+    if (!tx) throw new Error('Transaksi tidak ditemukan.');
+    const items = db
+      .prepare(
+        `SELECT product_name AS name, qty, price, subtotal
+         FROM transaction_items WHERE transaction_id = ? ORDER BY id`,
+      )
+      .all(transactionId) as ReceiptItemLine[];
+    const date = tx.sold_at.slice(0, 10);
+    const data: ReceiptData = {
+      storeName: settingsRepo.getSetting(db, 'store_name', 'GreenMart'),
+      code: tx.code,
+      soldAt: tx.sold_at,
+      items,
+      total: tx.total,
+      itemCount: tx.item_count,
+      cashiers: cashierNamesFor(db, date),
+      logoDataUri: logoDataUri(),
+      widthMm: Number(settingsRepo.getSetting(db, 'receipt_width_mm', '58')) || 58,
+    };
+    await printHtml(buildReceiptHtml(data));
+    log.info(`Struk dicetak: ${tx.code} (${data.widthMm}mm)`);
+  });
+
   // ---------- Dashboard ----------
   ipcMain.handle('dashboard:cards', () => dashboardCards(db));
   ipcMain.handle('dashboard:trend', (_e, days: number) => dashboardTrend(db, days));
@@ -202,6 +352,100 @@ export function registerIpc(ctx: IpcContext): void {
     dashboardTop(db, days, by),
   );
   ipcMain.handle('dashboard:hourly', (_e, days: number) => dashboardHourly(db, days));
+  ipcMain.handle('dashboard:byCategory', (_e, days: number) => dashboardByCategory(db, days));
+  ipcMain.handle('dashboard:stats', (_e, days: number) => dashboardStats(db, days));
+  ipcMain.handle('dashboard:lowStock', () => {
+    const threshold = Number(settingsRepo.getSetting(db, 'low_stock_alert', '5')) || 5;
+    return products.listLowStock(db, threshold);
+  });
+
+  // ---------- Laporan (v1.0.1) ----------
+  ipcMain.handle('reports:rows', (_e, mode: ReportMode, anchor: string) => {
+    const range = reportRange(mode, anchor);
+    return { range, rows: reportsRepo.salesByItem(db, range.start, range.end) };
+  });
+  ipcMain.handle('reports:exportCsv', async (_e, mode: ReportMode, anchor: string) => {
+    const range = reportRange(mode, anchor);
+    const rows = reportsRepo.salesByItem(db, range.start, range.end);
+    if (!rows.length) {
+      return { ok: false, message: 'Tidak ada penjualan pada periode ini — CSV tidak dibuat.' };
+    }
+    const storeName = settingsRepo.getSetting(db, 'store_name', 'GreenMart');
+    const csv = reportsRepo.buildReportCsv(rows, [
+      `Laporan ${mode} ${storeName}`,
+      `Periode: ${range.start} s.d. ${range.end}`,
+      `Dibuat: ${toIsoLocal()}`,
+    ]);
+    const defName = `laporan-${mode}-${range.start}${mode === 'harian' ? '' : `_${range.end}`}.csv`;
+    const res = await dialog.showSaveDialog({
+      title: 'Simpan laporan CSV',
+      defaultPath: defName,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (res.canceled || !res.filePath) {
+      return { ok: false, message: 'Ekspor dibatalkan.' };
+    }
+    fs.writeFileSync(res.filePath, csv, 'utf8');
+    log.info(`Laporan diekspor: ${res.filePath} (${rows.length} baris)`);
+    return { ok: true, path: res.filePath, message: `CSV tersimpan: ${res.filePath}` };
+  });
+
+  // ---------- Stok opname (v1.0.1) ----------
+  ipcMain.handle('opname:reminder', () => {
+    const last = opnameRepo.getLastDone(db);
+    const cycleDays = Number(settingsRepo.getSetting(db, 'opname_cycle_days', '3')) || 3;
+    return computeOpnameReminder(last, cycleDays, localDate());
+  });
+  ipcMain.handle('opname:start', (_e, phase: 'awal' | 'akhir') => {
+    const petugas = cashierNamesFor(db, localDate()).join(', ') || null;
+    return opnameRepo.startOpname(db, phase, petugas);
+  });
+  ipcMain.handle('opname:current', () => {
+    const draft = opnameRepo.getCurrentDraft(db);
+    return draft ? opnameRepo.getOpname(db, draft.id) : null;
+  });
+  ipcMain.handle('opname:get', (_e, id: string) => opnameRepo.getOpname(db, id));
+  ipcMain.handle('opname:setPhysical', (_e, itemId: string, qty: number | null) =>
+    opnameRepo.setPhysical(db, itemId, qty),
+  );
+  ipcMain.handle('opname:fillSystem', (_e, id: string) => opnameRepo.fillRemainingWithSystem(db, id));
+  ipcMain.handle('opname:confirm', (_e, id: string) => opnameRepo.confirmOpname(db, id));
+  ipcMain.handle('opname:cancel', (_e, id: string) => opnameRepo.cancelDraft(db, id));
+  ipcMain.handle('opname:history', () => opnameRepo.listOpnames(db, 30));
+
+  // ---------- Data dummy / demo (v1.0.2) ----------
+  ipcMain.handle('demo:importDummy', async () => {
+    const res = await dialog.showOpenDialog({
+      title: 'Pilih file data demo (greenmart-dummy.json)',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (res.canceled || !res.filePaths.length) {
+      return { ok: false, message: 'Impor dibatalkan.' };
+    }
+    const file = res.filePaths[0];
+    try {
+      const raw: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+      // Validasi dulu SEBELUM backup/impor supaya file rusak tidak menimpa backup.
+      validateBundle(raw);
+      // Auto-backup DB saat ini (bisa dipulihkan dari Pengaturan bila perlu).
+      const dir = settingsRepo.getSetting(db, 'backup_dir', '') || ctx.defaultBackupDir;
+      settingsRepo.setSetting(db, 'backup_dir', dir);
+      const backup = runBackup(db, dir, false);
+      log.info(`Backup pra-import demo: ${backup.file ?? dir}`);
+      const counts = importDummyBundle(db, raw);
+      const msg =
+        `Data demo diimpor: ${counts.products} produk, ${counts.students} siswa, ` +
+        `${counts.attendance} absensi, ${counts.transactions} transaksi (${counts.items} item), ` +
+        `${counts.opnames} opname. Backup dibuat: ${backup.file ?? dir}`;
+      log.info(`Import data demo dari ${file}: ${msg}`);
+      return { ok: true, message: msg, counts };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gagal mengimpor data demo.';
+      log.warn(`Import data demo gagal (${file}): ${message}`);
+      return { ok: false, message };
+    }
+  });
 
   // ---------- Pengaturan ----------
   ipcMain.handle('settings:all', () => settingsRepo.getAllSettings(db));

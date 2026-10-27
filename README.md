@@ -12,26 +12,36 @@ Dibangun dengan **Electron + electron-vite + React + TypeScript (strict)**, data
 
 | Layar (tombol) | Isi |
 |---|---|
-| **Kasir (F1)** | Scan barcode → keranjang → **↓ + Enter** bayar tunai instan (uang pas). Scan NISN = absensi + kasir aktif. Barcode tak dikenal → langsung bisa didaftarkan. |
-| **Produk (F2)** | CRUD produk, pencarian, badge stok menipis/habis, soft/hard delete sesuai riwayat, generate & cetak **label Code 128** (grid kolom×baris dapat diatur). |
-| **Absensi (F3)** | Import CSV siswa (toleran: tab/koma, BOM, apostrof NISN, header), scan NISN → kartu identitas + log hadir, riwayat per tanggal, set kasir aktif. |
-| **Dashboard (F4)** | Omzet/transaksi/item hari ini, tren omzet 7/30/90 hari, produk terlaris (qty/omzet), jam ramai — semuanya dihitung dari SQLite. |
-| **Pengaturan** | Nama toko, stok minimum default, interval sync, **Setup Wizard kredensial Google**, folder backup, danger zone. |
+| **Kasir (F1)** | Scan barcode → keranjang → **↓ + Enter** bayar tunai instan (uang pas). Scan NISN = absensi + kasir aktif. Barcode tak dikenal → langsung bisa didaftarkan. **F9** cari produk manual (nama/kode 3–5 digit) untuk UMKM tanpa barcode. Tombol **🧾 Cetak Struk** di overlay konfirmasi (thermal 58/80 mm, logo + nama kasir jaga otomatis). Alert stok menipis global. |
+| **Produk (F2)** | CRUD produk + **kategori**, pencarian, badge stok menipis/habis (batas global), filter kategori, soft/hard delete sesuai riwayat, generate & cetak **label Code 128**. |
+| **Absensi (F3)** | Import CSV siswa (toleran: tab/koma, BOM, apostrof NISN, header), scan NISN → kartu identitas + log hadir, riwayat per tanggal, **rekap kehadiran bulanan** (jumlah hari, rata-rata jam datang), set kasir aktif. |
+| **Dashboard (F4)** | Omzet/transaksi/item hari ini, **rata-rata omzet/hari**, grafik garis omzet + kuantitas, jam ramai, **penjualan per kategori (batang + lingkaran)**, modus produk terlaris Top 7, panel stok menipis. |
+| **Laporan (F5)** | Laporan penjualan **harian/mingguan/bulanan** per item (qty + omzet + kategori), navigasi periode, **ekspor CSV** (Excel-friendly), rekap harian per item tersinkron ke tab `Rekap Harian Item`. |
+| **Stok Opname (F6)** | Catat stok fisik vs sistem (selisih qty + nilai) — **hanya mencatat, tidak mengubah stok**. Siklus jaga X hari: opname *awal* pagi hari ke-1, opname *akhir* di hari terakhir (pengingat otomatis di banner). Petugas otomatis dari absensi hari itu. Sinkron ke tab `Stok Opname`. |
+| **Pengaturan** | Nama toko, **kategori produk (CRUD)**, batas alert stok menipis, siklus opname, lebar struk, **tema terang/gelap**, interval sync, **Setup Wizard kredensial Google**, folder backup, danger zone, **import data demo (v1.0.2)**. |
 | **F8** | Dialog sinkronisasi: status pending/failed, error terakhir, retry, buka spreadsheet. |
 
-Peta keyboard lengkap: PRD §8 (dipertahankan: `↓+Enter` bayar, `Del` hapus baris, `+`/`−` qty, `Esc` tutup dialog).
+Peta keyboard lengkap: PRD §8 + tambahan v1.0.1 (`F5` Laporan, `F6` Opname, `F9` cari produk; dipertahankan: `↓+Enter` bayar, `Del` hapus baris, `+`/`−` qty, `Esc` tutup dialog).
+
+## Logo sekolah
+
+Logo dipakai sebagai ikon aplikasi/installer, header in-app, dan di struk thermal:
+
+1. Simpan file `logo-sekolah.webp` di **root project**.
+2. Jalankan `node scripts/gen-icon.cjs` → menghasilkan `resources/icon.png`, `resources/icon.ico`, dan `resources/icons/*.png` (butuh ImageMagick).
+3. File otomatis tersalin ke `resources/logo-sekolah.webp` (struk) dan `src/renderer/src/assets/` (header).
 
 ## Struktur project
 
 ```
 src/
-├── main/       # Main process: DB, IPC, sync Google, CSV, backup
+├── main/       # Main process: DB, IPC, sync Google, CSV, backup, struk, opname, laporan
 ├── preload/    # contextBridge (satu pintu IPC, typed)
-├── renderer/   # UI React (screens: Kasir, Produk, Absensi, Dashboard, Pengaturan)
-├── shared/     # Tipe bersama, formatter rupiah, routing scan (pure)
-└── tests/      # Unit test Vitest (40 test)
+├── renderer/   # UI React (Kasir, Produk, Absensi, Dashboard, Laporan, Opname, Pengaturan)
+└── shared/     # Tipe bersama, formatter rupiah, routing scan, periode & opname (pure)
+tests/          # Unit test Vitest (70 test)
 docs/           # ADR + checklist AC
-scripts/        # Generator ikon
+scripts/        # Konversi logo → ikon
 ```
 
 ## Menjalankan (development)
@@ -80,7 +90,7 @@ npm run dist:linux # AppImage + deb (Linux)
    - Tambahkan email service account (`...@...iam.gserviceaccount.com`) sebagai **Editor** (agar aplikasi boleh menulis).
    - **General access → Anyone with the link → Viewer** (agar publik sekolah bisa membaca — syarat PRD #4).
 5. Di aplikasi: **Pengaturan → Setup Wizard Kredensial Google** → paste isi JSON key + URL spreadsheet → **Uji Koneksi** → **Simpan (Terenkripsi)**.
-6. Tab `Transaksi`, `Detail Transaksi`, `Ringkasan Harian`, `Produk` dibuat otomatis (dengan header bold) pada sync pertama.
+6. Tab dibuat otomatis (dengan header bold) pada sync pertama: `Transaksi`, `Detail Transaksi`, `Ringkasan Harian`, `Produk`, `Rekap Harian Item`, `Stok Opname`. Header tab lama yang kurang kolom (mis. `Produk` + `kategori`) diperbaiki otomatis (self-heal) saat sync berikutnya.
 
 Sinkronisasi berjalan otomatis: saat aplikasi start, tiap interval (default 10 menit, dapat diatur), saat internet kembali, dan manual (F8 → *Sinkronisasi Sekarang*). Data gagal sync tetap `pending`/`failed` di SQLite dan tidak pernah hilang.
 
@@ -101,13 +111,46 @@ Tanpa scanner pun bisa dipakai: ketik barcode manual di layar Kasir lalu Enter.
 | Backup harian (7 terakhir) | `userData/backups/` (bisa diubah di Pengaturan) |
 | Log | `userData/logs/main.log` |
 
+## Data demo (presentasi) — v1.0.2
+
+Untuk demo/presentasi, aplikasi bisa diisi data contoh yang terlihat seperti kondisi asli:
+produk kantin, 12 siswa, absensi pagi, ±2 bulan transaksi dengan pola jam ramai, dan 2 sesi
+stok opname. **Koperasi tutup di Sabtu–Minggu dan hari libur nasional/cuti bersama** (17 Agustus,
+Maulid Nabi, Nyepi, Idul Fitri, dll) — tidak ada transaksi/absensi di hari tersebut.
+
+**Cara pakai:**
+
+1. Buka **Pengaturan → Data Demo (Presentasi)** → klik **📂 Impor File Data Demo...**
+2. Pilih file `demo/greenmart-dummy.json`.
+3. Selesai — dashboard & laporan langsung menampilkan gabungan data asli + demo.
+
+**Yang perlu diketahui:**
+
+- Import bersifat **GABUNG (merge)**: data asli tidak dihapus/diubah. Produk dengan barcode sama
+  dan siswa dengan NISN sama **dilewati**; transaksi dummy dedup by ID (aman diimpor berulang).
+- Transaksi dummy disimpan sebagai **riwayat** — stok produk **tidak berkurang** — dan ditandai
+  *sudah tersinkron* agar tidak membanjiri spreadsheet Google Sheets.
+- **Backup otomatis dibuat** sebelum impor; bisa dipulihkan dari folder backup bila perlu.
+- Setelah impor, rentang sinkron rekap (`report_sync_from`) dipangkatkan ke kemarin.
+
+**Regenerasi file demo** (tanggal selalu relatif ke hari dijalankan — jalankan ulang menjelang
+presentasi agar 75 hari terakhirnya segar):
+
+```bash
+node scripts/gen-dummy-data.cjs   # tulis ulang demo/greenmart-dummy.json (deterministik, seed tetap)
+```
+
 ## Unit test
 
-Mencakup wajib DoD PRD §12: parser CSV siswa, routing scan (produk/NISN/tak dikenal),
-filter dedup ID + backoff, recompute `daily_summaries` (dengan DB in-memory nyata), formatter rupiah.
+Mencakup wajib DoD PRD §12 + tambahan v1.0.1: parser CSV siswa, routing scan, filter dedup ID +
+backoff, recompute `daily_summaries`, formatter rupiah, rentang periode laporan (minggu/bulan),
+pengingat opname (siklus & nag), repositori kategori, opname (snapshot/selisih/konfirmasi),
+agregat laporan + CSV, rekap absensi bulanan, migrasi skema v1→v2.
 
 ## Catatan keamanan
 
 - Tidak ada kredensial di source code/bundle (verifikasi: `grep` di AC checklist).
 - Kredensial Google hanya di Setup Wizard → disimpan terenkripsi `safeStorage`.
+- File JSON key service account **jangan disimpan di folder project**; pola `greenmart-*.json`
+  dan `*service-account*.json` sudah di-ignore git sebagai pengaman ganda.
 - Renderer sandboxed; semua akses DB via IPC.

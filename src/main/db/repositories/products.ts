@@ -3,6 +3,7 @@ import type { DB } from '../database';
 import type { Product, ProductFilter, ProductInput } from '@shared/types';
 import { uuid } from '../../util/uuid';
 import { toIsoLocal } from '../../util/time';
+import { categoryExists } from './categories';
 
 export function validateProductInput(input: ProductInput): ProductInput {
   const barcode = input.barcode.trim();
@@ -12,21 +13,31 @@ export function validateProductInput(input: ProductInput): ProductInput {
   for (const [label, v] of [
     ['Harga', input.price],
     ['Stok', input.stock],
-    ['Stok minimum', input.min_stock],
   ] as const) {
     if (!Number.isInteger(v) || v < 0) throw new Error(`${label} harus bilangan bulat >= 0.`);
   }
   return { ...input, barcode, name };
 }
 
+function categoryIdOrThrow(db: DB, categoryId: string | null | undefined): string | null {
+  if (!categoryId) return null;
+  if (!categoryExists(db, categoryId)) throw new Error('Kategori tidak ditemukan.');
+  return categoryId;
+}
+
 export function listProducts(
   db: DB,
-  q: { search?: string; filter?: ProductFilter },
+  q: { search?: string; filter?: ProductFilter; categoryId?: string },
 ): Product[] {
   const conds: string[] = [];
   const params: (string | number)[] = [];
   if (q.filter === 'active') conds.push('is_active = 1');
   if (q.filter === 'inactive') conds.push('is_active = 0');
+  if (q.categoryId === 'none') conds.push('category_id IS NULL');
+  else if (q.categoryId) {
+    conds.push('category_id = ?');
+    params.push(q.categoryId);
+  }
   if (q.search && q.search.trim()) {
     conds.push('(name LIKE ? OR barcode LIKE ?)');
     const like = `%${q.search.trim()}%`;
@@ -36,6 +47,15 @@ export function listProducts(
   return db
     .prepare(`SELECT * FROM products ${where} ORDER BY name COLLATE NOCASE ASC`)
     .all(...params) as Product[];
+}
+
+/** Produk aktif dengan stok <= batas alert global (panel "Stok Menipis" di Dashboard). */
+export function listLowStock(db: DB, threshold: number): Product[] {
+  return db
+    .prepare(
+      'SELECT * FROM products WHERE is_active = 1 AND stock <= ? ORDER BY stock ASC, name COLLATE NOCASE ASC',
+    )
+    .all(threshold) as Product[];
 }
 
 export function getProductByBarcode(db: DB, barcode: string): Product | null {
@@ -70,11 +90,12 @@ export function createProduct(db: DB, input: ProductInput): Product {
   const v = validateProductInput(input);
   const now = toIsoLocal();
   const id = uuid();
+  const categoryId = categoryIdOrThrow(db, v.category_id);
   try {
     db.prepare(
-      `INSERT INTO products (id, barcode, name, price, stock, min_stock, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, v.barcode, v.name, v.price, v.stock, v.min_stock, v.is_active ? 1 : 0, now, now);
+      `INSERT INTO products (id, barcode, name, price, stock, min_stock, is_active, created_at, updated_at, category_id)
+       VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?)`,
+    ).run(id, v.barcode, v.name, v.price, v.stock, v.is_active ? 1 : 0, now, now, categoryId);
   } catch (err) {
     const msg = constraintMessage(err);
     if (msg) throw new Error(msg);
@@ -88,11 +109,12 @@ export function updateProduct(db: DB, id: string, input: ProductInput): Product 
   const existing = getProductById(db, id);
   if (!existing) throw new Error('Produk tidak ditemukan.');
   const now = toIsoLocal();
+  const categoryId = categoryIdOrThrow(db, v.category_id);
   try {
     db.prepare(
-      `UPDATE products SET barcode = ?, name = ?, price = ?, stock = ?, min_stock = ?, is_active = ?, updated_at = ?
+      `UPDATE products SET barcode = ?, name = ?, price = ?, stock = ?, is_active = ?, updated_at = ?, category_id = ?
        WHERE id = ?`,
-    ).run(v.barcode, v.name, v.price, v.stock, v.min_stock, v.is_active ? 1 : 0, now, id);
+    ).run(v.barcode, v.name, v.price, v.stock, v.is_active ? 1 : 0, now, categoryId, id);
   } catch (err) {
     const msg = constraintMessage(err);
     if (msg) throw new Error(msg);

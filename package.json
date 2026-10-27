@@ -1,7 +1,7 @@
 {
   "name": "greenmart",
   "productName": "GreenMart Kasir",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Aplikasi kasir (POS) koperasi sekolah — offline-first, SQLite lokal, sinkronisasi Google Sheets",
   "main": "out/main/index.js",
   "homepage": "https://example.com/greenmart",

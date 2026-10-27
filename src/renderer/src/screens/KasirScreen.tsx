@@ -1,12 +1,13 @@
-// F1 — Layar Kasir: scan -> keranjang -> bayar tunai instan (PRD F1).
+// F1 — Layar Kasir: scan -> keranjang -> bayar tunai instan (PRD F1) + pencarian manual F9 (v1.0.1).
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import type { PaymentResult, ScanStudentRef, Student } from '@shared/types';
+import type { PaymentResult, Product, ScanStudentRef, Student } from '@shared/types';
 import { rupiah } from '@shared/format';
 import { useScanEngine } from '../lib/useScanEngine';
 import { beepCash, beepError, beepOk, beepWarn } from '../lib/beep';
 import { useToast } from '../lib/toast';
 import Modal from '../components/Modal';
 import ProductFormModal from '../components/ProductFormModal';
+import ManualSearchModal from '../components/ManualSearchModal';
 
 interface CartLine {
   productId: string;
@@ -38,15 +39,32 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
   const [registerBarcode, setRegisterBarcode] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const confirmTimer = useRef<number | null>(null);
+  // v1.0.1: pencarian manual (F9) + alert stok menipis global
+  const [manualOpen, setManualOpen] = useState(false);
+  const [lowStock, setLowStock] = useState<Product[]>([]);
+  const [lowThreshold, setLowThreshold] = useState(5);
 
   // Overlay konfirmasi TIDAK memblokir scan — kasir tetap bisa melayani pelanggan berikutnya
   // saat overlay masih tampil (PRD F1: "siap menerima scan berikutnya").
-  const blocked = unknown !== null || registerBarcode !== null || paying;
+  const blocked = unknown !== null || registerBarcode !== null || paying || manualOpen;
 
   useEffect(() => {
     return () => {
       if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
     };
+  }, []);
+
+  // Alert stok menipis: satu angka global (setting low_stock_alert).
+  useEffect(() => {
+    void (async () => {
+      const [items, s] = await Promise.all([window.api.dashboardLowStock(), window.api.settingsAll()]);
+      setLowStock(items);
+      setLowThreshold(Number(s.low_stock_alert ?? '5') || 5);
+    })();
+  }, []);
+
+  const refreshLowStock = useCallback((): void => {
+    void window.api.dashboardLowStock().then(setLowStock);
   }, []);
 
   // ---- Aksi keranjang (baca/mutasi lewat linesRef agar konsisten) ----
@@ -208,6 +226,27 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
     },
   });
 
+  // F9 juga saat fokus di elemen biasa (useScanEngine menangkapnya saat scan engine aktif).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        setManualOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /** Cetak struk transaksi terakhir (dari overlay konfirmasi). */
+  const printReceipt = useCallback(async (id: string): Promise<void> => {
+    try {
+      await window.api.printReceipt(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal mencetak struk.');
+    }
+  }, [toast]);
+
   const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
 
   return (
@@ -288,6 +327,9 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
         <div className="scan-indicator">
           {buffer ? <span>{buffer}</span> : <span className="ph">Scan barcode / NISN…</span>}
         </div>
+        <button className="btn btn-block" style={{ marginBottom: 10 }} onClick={() => setManualOpen(true)}>
+          🔍 Cari Produk Manual (F9)
+        </button>
         <ul style={{ lineHeight: 2, paddingLeft: 18, margin: 0 }} className="muted">
           <li>Scan produk → masuk keranjang (beep)</li>
           <li>Scan NISN siswa → absensi + kasir aktif</li>
@@ -302,6 +344,16 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
             {lines.length} item · {lines.reduce((s, l) => s + l.qty, 0)} pcs
           </p>
         </div>
+        {lowStock.length > 0 && (
+          <div className="notice-banner warn" style={{ marginTop: 16, marginBottom: 0 }}>
+            <span>⚠️</span>
+            <span className="grow" style={{ fontSize: 13 }}>
+              <b>{lowStock.length}</b> produk stok ≤ {lowThreshold}:{' '}
+              {lowStock.slice(0, 5).map((p) => `${p.name} (${p.stock})`).join(', ')}
+              {lowStock.length > 5 ? `, +${lowStock.length - 5} lainnya` : ''}
+            </span>
+          </div>
+        )}
       </section>
 
       {/* Konfirmasi singkat <= 3 detik */}
@@ -311,7 +363,24 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--green-dark)' }}>✅ Transaksi tersimpan</div>
             <div className="amount">{rupiah(confirm.total)}</div>
             <div className="code">{confirm.code}</div>
-            <p className="muted" style={{ marginBottom: 0 }}>Siap melayani pelanggan berikutnya…</p>
+            <div className="confirm-actions">
+              <button
+                className="btn"
+                onClick={() => {
+                  setConfirm(null);
+                  refreshLowStock();
+                }}
+              >
+                Tutup
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void printReceipt(confirm.id)}
+                title="Cetak struk thermal"
+              >
+                🧾 Cetak Struk
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -351,6 +420,14 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
           initial={{ barcode: registerBarcode }}
           onClose={() => setRegisterBarcode(null)}
           onSaved={() => setRegisterBarcode(null)}
+        />
+      )}
+
+      {/* Pencarian produk manual (F9) — untuk produk tanpa barcode */}
+      {manualOpen && (
+        <ManualSearchModal
+          onClose={() => setManualOpen(false)}
+          onPick={(p) => addProduct(p)}
         />
       )}
     </div>

@@ -1,12 +1,30 @@
 // Repositori tabel settings.
 import type { DB } from '../database';
 import type { SettingsMap } from '@shared/types';
+import { uuid } from '../../util/uuid';
+import { toIsoLocal } from '../../util/time';
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
   store_name: 'GreenMart',
-  min_stock_default: '5',
+  min_stock_default: '5', // legacy v1.0.0 — tidak lagi dipakai (diganti low_stock_alert)
   sync_interval_minutes: '10',
+  // v1.0.1
+  low_stock_alert: '5', // batas global alert stok menipis
+  opname_cycle_days: '3', // periode jaga X hari
+  receipt_width_mm: '58', // lebar kertas struk thermal
+  theme: 'system', // light | dark | system
 };
+
+/** Kategori awal agar grafik distribusi langsung terpakai (boleh diubah/dihapus di Pengaturan). */
+const DEFAULT_CATEGORIES = ['Makanan', 'Minuman', 'Alat Tulis', 'Lainnya'];
+
+export function seedDefaultCategories(db: DB): void {
+  const count = (db.prepare('SELECT COUNT(*) AS c FROM categories').get() as { c: number }).c;
+  if (count > 0) return;
+  const ins = db.prepare('INSERT INTO categories (id, name, created_at) VALUES (?, ?, ?)');
+  const now = toIsoLocal();
+  for (const name of DEFAULT_CATEGORIES) ins.run(uuid(), name, now);
+}
 
 export function seedDefaultSettings(db: DB): void {
   const ins = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');

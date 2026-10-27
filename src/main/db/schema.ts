@@ -78,6 +78,39 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
+CREATE TABLE IF NOT EXISTS categories (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+-- v1.0.1: kolom products.category_id ditambahkan via migrasi (lihat MIGRATIONS di database.ts)
+
+CREATE TABLE IF NOT EXISTS stock_opnames (
+  id           TEXT PRIMARY KEY,
+  local_date   TEXT NOT NULL,          -- YYYY-MM-DD
+  phase        TEXT NOT NULL CHECK (phase IN ('awal','akhir')),
+  petugas      TEXT,                   -- daftar nama siswa absen hari itu (dipisah koma)
+  status       TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','done')),
+  created_at   TEXT NOT NULL,
+  confirmed_at TEXT,
+  synced_at    TEXT                    -- sinkron ke tab Sheets 'Stok Opname'
+);
+CREATE INDEX IF NOT EXISTS idx_opname_date ON stock_opnames(local_date);
+
+CREATE TABLE IF NOT EXISTS stock_opname_items (
+  id             TEXT PRIMARY KEY,
+  opname_id      TEXT NOT NULL REFERENCES stock_opnames(id) ON DELETE CASCADE,
+  product_id     TEXT REFERENCES products(id),
+  barcode        TEXT NOT NULL,
+  product_name   TEXT NOT NULL,
+  price          INTEGER NOT NULL,     -- snapshot harga saat opname
+  system_stock   INTEGER NOT NULL,     -- stok sistem saat mulai opname
+  physical_stock INTEGER,              -- NULL = belum diinput (draft)
+  diff_qty       INTEGER,              -- system - physical
+  diff_value     INTEGER               -- diff_qty * price (nilai simpangan)
+);
+CREATE INDEX IF NOT EXISTS idx_opname_items ON stock_opname_items(opname_id);
+
 CREATE TABLE IF NOT EXISTS sync_log (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   scope      TEXT NOT NULL,            -- 'transactions'|'daily'|'products'|'auth'|'network'
@@ -87,4 +120,12 @@ CREATE TABLE IF NOT EXISTS sync_log (
 );
 `;
 
-export const USER_VERSION = 1;
+export const USER_VERSION = 2;
+
+/**
+ * Migrasi bertahap: key = versi ASAL, value = langkah menuju versi+1.
+ * v1->v2: kategori produk (kolom products.category_id — nullable, produk lama tanpa kategori).
+ */
+export const MIGRATIONS: Record<number, string[]> = {
+  1: ['ALTER TABLE products ADD COLUMN category_id TEXT REFERENCES categories(id)'],
+};

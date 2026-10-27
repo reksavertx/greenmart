@@ -1,6 +1,8 @@
-// Header: brand, kasir aktif (dropdown daftar hadir hari ini), chip status sinkron.
+// Header: logo sekolah, brand, kasir aktif (dropdown daftar hadir hari ini), chip status sinkron,
+// toggle tema terang/gelap (v1.0.1).
 import { useEffect, useState, type ReactElement } from 'react';
 import type { AttendanceEntry, Student, SyncStatusInfo } from '@shared/types';
+import logoUrl from '../assets/logo-sekolah.webp';
 
 interface Props {
   storeName: string;
@@ -10,18 +12,23 @@ interface Props {
   syncInfo: SyncStatusInfo | null;
   syncRunning: boolean;
   onOpenSync: () => void;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
 }
 
 export function syncChipText(info: SyncStatusInfo | null, running: boolean): string {
-  if (running) return 'Sinkron: sedang berjalan…';
-  if (!info) return 'Sinkron: …';
+  if (running) return 'Sinkron: sedang berjalan...';
+  if (!info) return 'Sinkron: ...';
   const n = info.transactions.pending + info.transactions.failed + info.daily.pending + info.daily.failed;
   const t = info.last_sync_at ? info.last_sync_at.slice(11, 16) : 'belum pernah';
   return `Sinkron: ${n} menunggu · terakhir ${t}`;
 }
 
 export default function Header(props: Props): ReactElement {
-  const { storeName, attendees, activeCashier, onPickCashier, syncInfo, syncRunning, onOpenSync } = props;
+  const {
+    storeName, attendees, activeCashier, onPickCashier, syncInfo, syncRunning, onOpenSync,
+    theme, onToggleTheme,
+  } = props;
   const [clock, setClock] = useState('');
 
   useEffect(() => {
@@ -37,8 +44,11 @@ export default function Header(props: Props): ReactElement {
   return (
     <header className="header">
       <div className="brand">
-        {storeName || 'GreenMart'}
-        <small>Kasir Koperasi Sekolah · {clock}</small>
+        <img src={logoUrl} alt="Logo sekolah" />
+        <div>
+          {storeName || 'GreenMart'}
+          <small>Kasir Koperasi Sekolah · {clock}</small>
+        </div>
       </div>
       <div className="header-spacer" />
       <div className="cashier-box">
@@ -59,6 +69,14 @@ export default function Header(props: Props): ReactElement {
       <button className={`sync-chip ${cls}`} onClick={onOpenSync} title="Buka detail sinkronisasi (F8)">
         <span className="dot" />
         {syncChipText(syncInfo, syncRunning)}
+      </button>
+      <button
+        className="theme-toggle"
+        onClick={onToggleTheme}
+        title="Ganti tema (terang/gelap)"
+        aria-label="Ganti tema"
+      >
+        {theme === 'dark' ? '☀️' : '🌙'}
       </button>
     </header>
   );

@@ -27,9 +27,9 @@ afterEach(() => {
 });
 
 function seedPrdProducts(): void {
-  createProduct(db, { barcode: '8998866200011', name: 'Chiki Jagung', price: 5000, stock: 20, min_stock: 5, is_active: true });
-  createProduct(db, { barcode: '8992761110017', name: 'Aqua 600ml', price: 3000, stock: 48, min_stock: 5, is_active: true });
-  createProduct(db, { barcode: 'SNACK001', name: 'Roti Bungkus Sendiri', price: 2500, stock: 5, min_stock: 5, is_active: true });
+  createProduct(db, { barcode: '8998866200011', name: 'Chiki Jagung', price: 5000, stock: 20, is_active: true, category_id: null });
+  createProduct(db, { barcode: '8992761110017', name: 'Aqua 600ml', price: 3000, stock: 48, is_active: true, category_id: null });
+  createProduct(db, { barcode: 'SNACK001', name: 'Roti Bungkus Sendiri', price: 2500, stock: 5, is_active: true, category_id: null });
 }
 
 describe('file-based DB (AC6, §9)', () => {

@@ -1,6 +1,6 @@
-// F3 — Absensi jaga kasir via NISN + import CSV siswa (PRD F3, AC10-AC12).
+// F3 — Absensi jaga kasir via NISN + import CSV siswa (PRD F3, AC10-AC12) + rekap bulanan (v1.0.1).
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import type { AttendanceEntry, ImportPreview, ScanIdentity } from '@shared/types';
+import type { AttendanceEntry, AttendanceRecapRow, ImportPreview, ScanIdentity } from '@shared/types';
 import { useScanEngine } from '../lib/useScanEngine';
 import { beepError, beepOk, beepWarn } from '../lib/beep';
 import { useToast } from '../lib/toast';
@@ -12,11 +12,18 @@ function today(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+function thisMonth(): string {
+  return today().slice(0, 7);
+}
+
 export default function AttendanceScreen({ onCashierChanged }: { onCashierChanged: () => void }): ReactElement {
   const toast = useToast();
+  const [tab, setTab] = useState<'harian' | 'rekap'>('harian');
   const [card, setCard] = useState<ScanIdentity | null>(null);
   const [date, setDate] = useState(today());
   const [entries, setEntries] = useState<AttendanceEntry[]>([]);
+  const [recapMonth, setRecapMonth] = useState(thisMonth());
+  const [recap, setRecap] = useState<AttendanceRecapRow[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [fileName, setFileName] = useState('');
@@ -29,6 +36,11 @@ export default function AttendanceScreen({ onCashierChanged }: { onCashierChange
   useEffect(() => {
     void refresh(date);
   }, [date, refresh]);
+
+  useEffect(() => {
+    if (tab !== 'rekap') return;
+    void window.api.attendanceRecap(recapMonth).then(setRecap);
+  }, [tab, recapMonth]);
 
   const handleStudent = useCallback(
     async (s: { id: string; nisn: string; name: string; class_name: string; gender: 'P' | 'L' }) => {
@@ -105,6 +117,15 @@ export default function AttendanceScreen({ onCashierChanged }: { onCashierChange
         </button>
       </div>
 
+      <div className="tabs">
+        <button className={tab === 'harian' ? 'active' : ''} onClick={() => setTab('harian')}>
+          Hari Ini / Per Tanggal
+        </button>
+        <button className={tab === 'rekap' ? 'active' : ''} onClick={() => setTab('rekap')}>
+          Rekap Bulanan
+        </button>
+      </div>
+
       {card && (
         <div className="identity-card">
           <div className="nm">{card.name}</div>
@@ -117,17 +138,69 @@ export default function AttendanceScreen({ onCashierChanged }: { onCashierChange
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-pad" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <label style={{ fontWeight: 700 }}>Riwayat tanggal:</label>
-          <input
-            type="date"
-            style={{ width: 200 }}
-            value={date}
-            onChange={(e) => setDate(e.target.value || today())}
-          />
-          <span className="muted">{entries.length} siswa tercatat</span>
+      {tab === 'rekap' ? (
+        <div className="panel">
+          <div className="panel-pad" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <label style={{ fontWeight: 700 }}>Bulan:</label>
+            <input
+              type="month"
+              style={{ width: 200 }}
+              value={recapMonth}
+              onChange={(e) => e.target.value && setRecapMonth(e.target.value)}
+            />
+            <span className="muted">{recap.length} siswa pernah absen</span>
+          </div>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Nama</th>
+                  <th>Kelas</th>
+                  <th>NISN</th>
+                  <th className="num">Hadir (hari)</th>
+                  <th className="num">Rata-rata jam datang</th>
+                  <th>Tanggal hadir</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recap.map((r) => (
+                  <tr key={r.student_id}>
+                    <td><b>{r.name}</b></td>
+                    <td>{r.class_name}</td>
+                    <td className="mono">{r.nisn}</td>
+                    <td className="num"><span className="badge badge-ok">{r.days_count}</span></td>
+                    <td className="num">{r.avg_first_time ?? '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {r.dates.map((d) => d.slice(8)).join(', ')}
+                    </td>
+                  </tr>
+                ))}
+                {recap.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <div className="empty-state">
+                        <div className="ico">🗓</div>
+                        Belum ada kehadiran pada bulan {recapMonth}.
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
+      ) : (
+        <div className="panel">
+          <div className="panel-pad" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <label style={{ fontWeight: 700 }}>Riwayat tanggal:</label>
+            <input
+              type="date"
+              style={{ width: 200 }}
+              value={date}
+              onChange={(e) => setDate(e.target.value || today())}
+            />
+            <span className="muted">{entries.length} siswa tercatat</span>
+          </div>
         <div className="table-wrap">
           <table className="data">
             <thead>
@@ -171,6 +244,7 @@ export default function AttendanceScreen({ onCashierChanged }: { onCashierChange
           </table>
         </div>
       </div>
+      )}
 
       {importOpen && (
         <Modal

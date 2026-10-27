@@ -6,3 +6,9 @@ dist/
 .DS_Store
 .env
 *.local
+foto/
+
+# Kredensial service account Google — JANGAN PERNAH commit
+greenmart-*.json
+*service-account*.json
+*.pem

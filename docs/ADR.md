@@ -57,3 +57,70 @@ Async API dipakai (`isAsyncEncryptionAvailable`/`encryptStringAsync`/`decryptStr
 **Keputusan:** JsBarcode merender SVG di preview (renderer); HTML label lengkap dikirim ke main dan dicetak lewat `BrowserWindow` tersembunyi + `webContents.print()`.
 
 **Alasan:** print window harus mandiri (tidak boleh memuat script CDN — aplikasi offline); SVG statis aman dicetak di mana pun.
+
+---
+
+> ADR berikut dibuat untuk batch fitur v1.0.1.
+
+## ADR-8: Alert stok menipis = satu batas global
+
+**Keputusan:** satu setting `low_stock_alert` (default 5) dipakai untuk badge di layar Produk, panel Kasir, dan panel Dashboard. Kolom `products.min_stock` tetap ada di DB (kompatibilitas) tapi **tidak dipakai lagi** dan dihilangkan dari form/input.
+
+**Alasan:** pengelola koperasi sekolah mengelola ratusan produk dengan satuan stok kecil; memelihara nilai minimum per produk adalah beban input yang tidak realistis. Satu angka global cukup dan bisa diubah kapan saja.
+
+**Trade-off:** produk dengan kebutuhan batas berbeda (mis. rokok vs pulpen) tidak bisa dibedakan; dapat ditinjau di versi berikutnya bila ada permintaan.
+
+## ADR-9: Stok opname hanya mencatat (record-only)
+
+**Keputusan:** opname menyimpan snapshot stok sistem, input stok fisik, `diff_qty = system − physical`, dan `diff_value = diff_qty × harga snapshot`. **Konfirmasi TIDAK mengubah stok sistem** — hasil opname jadi bahan rapat pengurus, penyesuaian stok tetap manual lewat layar Produk.
+
+**Alasan:** (1) selaras dengan prinsip aman PRD §14.3 — otomatis mengubah stok berdasarkan opname berisiko merusak data bila stok fisik salah hitung; (2) audit trail tetap utuh karena tabel opname immutable setelah `done`; (3) tanggung jawab tetap jelas antara petugas jaga (mencatat) dan pengurus (memutuskan penyesuaian).
+
+**Skedul:** siklus jaga `opname_cycle_days` (default 3, clamp 2–31). Urutan fase berselang dari opname `done` terakhir: setelah *akhir* → *awal* due besoknya; setelah *awal* → *akhir* due pada hari ke-X siklus (hari ke-1 = hari opname awal). Murni dihitung di `src/shared/opname.ts` (pure, ter-test); petugas diisi otomatis dari nama siswa yang absen hari itu.
+
+## ADR-10: Struk thermal = HTML + dialog print OS
+
+**Keputusan:** struk dirender sebagai HTML (`src/main/util/receipt.ts`, `@page size: 58mm|80mm`) dan dicetak via `BrowserWindow` tersembunyi + `webContents.print({ silent: false })` — dialog print OS muncul, pengguna memilih printer.
+
+**Alasan:** tanpa dependensi ESC/POS native; bekerja untuk printer thermal driver maupun PDF; logo & nama kasir jaga mudah ditata. Nama kasir jaga diambil dari **absensi pada tanggal transaksi** (sumber sama dengan keputusan "kasir aktif"), bukan input manual.
+
+**Trade-off:** mengandalkan dialog print OS (tidak silent printing); bila nanti dibutuhkan raw ESC/POS langsung ke `/dev/usb/lp*`, builder HTML sudah memisahkan data dari presentasi sehingga mudah ditambah.
+
+## ADR-11: Logo sekolah webp → ikon via ImageMagick
+
+**Keputusan:** `scripts/gen-icon.cjs` mengonversi `logo-sekolah.webp` (sumber tunggal di root) menjadi `resources/icon.png` (512), `resources/icon.ico` (multi-ukuran), dan `resources/icons/*.png` (16–512) dengan `magick` (fallback `convert`/`ffmpeg`). Logo juga disalin ke `resources/` (dikemas via `extraResources`, dibaca main process untuk struk: dev → `app.getAppPath()/resources`, packaged → `process.resourcesPath`) dan ke `src/renderer/src/assets/` (header, di-bundle vite sebagai data URL).
+
+**Alasan:** satu file sumber menghindari ikon tak sinkron; webp dipilih sekolah (sudah tersedia); ImageMagick umum tersedia di Linux build host.
+
+## ADR-12: Tab Sheets baru v1.0.1 + self-heal header
+
+**Keputusan:**
+
+| Tab | Strategi |
+|---|---|
+| `Produk` | Tambah kolom ke-8 `kategori` (join `categories.name`). |
+| `Rekap Harian Item` (baru) | **Upsert by (`tanggal`,`barcode`)**. Rentang sinkron = setting `report_sync_from` … hari ini; run pertama memakai 30 hari terakhir; setelah sukses `report_sync_from` = kemarin (transaksi malam hari tetap ketangkap run berikutnya). |
+| `Stok Opname` (baru) | **Append-only, dedup by `item_id`** (self-heal untuk crash mid-sync); head ditandai `synced_at` setelah seluruh item terkirim. |
+
+`ensureTabs` kini juga **memeriksa header tab existing** dan menulis ulang bila kurang/berbeda — instalasi v1.0.0 mendapat kolom `kategori` otomatis tanpa migrasi manual.
+
+**Alasan:** rekap harian per item adalah bentuk yang dipakai bendahara untuk laporan; dedup by composite key aman karena nilai baris deterministik (agregat). Append-only untuk opname karena isi sesi immutable setelah `done`.
+
+## ADR-13: Data demo (v1.0.2) — merge-only, riwayat, tidak mendorong ke Sheets
+
+**Keputusan:** import data demo (`demo/greenmart-dummy.json`, dibuat `scripts/gen-dummy-data.cjs`)
+bersifat **GABUNG (merge)**: produk skip by barcode, siswa skip by NISN, absensi skip by
+(siswa, tanggal), transaksi dedup by UUID id (aman diimpor berulang), opname dedup by
+(tanggal, fase). Tanggal di file **absolut** (bukan offset hari) agar akhir pekan & hari libur
+nasional akurat — generator dijalankan ulang untuk menyegarkan window 75 hari.
+
+- Transaksi dummy = **riwayat demo**: stok TIDAK dikurangi, `sync_status='synced'` +
+  `synced_at` agar tidak mendorong ratusan baris demo ke Sheets; `report_sync_from` diset ke kemarin.
+- Ringkasan harian tanggal terdampak di-recompute lalu ditandai synced **hanya bila** tidak ada
+  transaksi nyata yang masih pending di tanggal itu.
+- Alur UI (Pengaturan): dialog file → `validateBundle` → **auto-backup** → import dalam satu
+  transaksi DB (error di tengah = rollback total).
+
+**Alasan:** presentasi butuh data yang terlihat nyata (pola jam ramai, Sabtu–Minggu & hari libur
+nasional kosong, opname dengan selisih wajar) tanpa merusak data operasional; merge + dedup by ID
+membuat import idempoten sehingga salah klik dua kali tidak menduplikasi data.

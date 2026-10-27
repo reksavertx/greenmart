@@ -1,6 +1,7 @@
 // Form tambah/edit produk. Field barcode mendukung scan langsung (scanner "mengetik" + Enter).
+// v1.0.1: dropdown kategori; stok minimum dihapus (alert pakai batas global di Pengaturan).
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import type { Product, ProductInput } from '@shared/types';
+import type { Category, Product, ProductInput } from '@shared/types';
 import Modal from './Modal';
 import { useToast } from '../lib/toast';
 import { beepError, beepOk } from '../lib/beep';
@@ -18,7 +19,8 @@ export default function ProductFormModal({ initial, onClose, onSaved }: Props): 
   const [name, setName] = useState(initial?.name ?? '');
   const [price, setPrice] = useState(String(initial?.price ?? ''));
   const [stock, setStock] = useState(String(initial?.stock ?? '0'));
-  const [minStock, setMinStock] = useState(String(initial?.min_stock ?? '5'));
+  const [categoryId, setCategoryId] = useState(initial?.category_id ?? '');
+  const [categories, setCategories] = useState<Category[]>([]);
   const [active, setActive] = useState(initial ? !!initial.is_active : true);
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -28,18 +30,22 @@ export default function ProductFormModal({ initial, onClose, onSaved }: Props): 
     barcodeRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    void window.api.categoriesList().then(setCategories);
+  }, []);
+
   const submit = async (): Promise<void> => {
     const input: ProductInput = {
       barcode: barcode.trim(),
       name: name.trim(),
       price: Number(price),
       stock: Number(stock),
-      min_stock: Number(minStock),
       is_active: active,
+      category_id: categoryId || null,
     };
     if (!input.barcode) return void toast.warn('Barcode wajib diisi (boleh discan langsung).');
     if (!input.name) return void toast.warn('Nama produk wajib diisi.');
-    for (const [label, v] of [['Harga', input.price], ['Stok', input.stock], ['Stok minimum', input.min_stock]] as const) {
+    for (const [label, v] of [['Harga', input.price], ['Stok', input.stock]] as const) {
       if (!Number.isInteger(v) || v < 0) {
         beepError();
         return void toast.warn(`${label} harus bilangan bulat >= 0.`);
@@ -104,8 +110,13 @@ export default function ProductFormModal({ initial, onClose, onSaved }: Props): 
           <input type="number" min={0} step={1} value={stock} onChange={(e) => setStock(e.target.value)} />
         </label>
         <label className="field">
-          <span>Stok minimum</span>
-          <input type="number" min={0} step={1} value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+          <span>Kategori</span>
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="">— Tanpa kategori —</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </label>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>

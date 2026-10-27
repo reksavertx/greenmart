@@ -17,7 +17,52 @@
   --focus: #0ea5e9;
   --radius: 12px;
   --shadow: 0 6px 24px rgba(15, 40, 25, 0.12);
+  --input-bg: #ffffff;
+  --chart-grid: #e2ece6;
+  --hover-row: #f6faf7;
+  --brand-text: #ffffff;
 }
+
+/* ---------- Tema gelap (v1.0.1): [data-theme='dark'] di <html> ---------- */
+[data-theme='dark'] {
+  --bg: #0f1713;
+  --panel: #16211b;
+  --ink: #e6efe9;
+  --muted: #93a89b;
+  --line: #2a3a31;
+  --green: #2aa368;
+  --green-dark: #3ec07c;
+  --green-soft: #1c2f25;
+  --amber: #f0a44a;
+  --amber-soft: #3a2c14;
+  --red: #f87171;
+  --red-soft: #3b1a1a;
+  --blue: #7aa7ff;
+  --blue-soft: #1c2740;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --input-bg: #101914;
+  --chart-grid: #2a3a31;
+  --hover-row: #1c2a22;
+  --brand-text: #ffffff;
+}
+[data-theme='dark'] body { background: var(--bg); color: var(--ink); }
+[data-theme='dark'] input[type='text'],
+[data-theme='dark'] input[type='number'],
+[data-theme='dark'] input[type='date'],
+[data-theme='dark'] input[type='month'],
+[data-theme='dark'] textarea,
+[data-theme='dark'] select { background: var(--input-bg); color: var(--ink); }
+[data-theme='dark'] table.data tr:hover td { background: var(--hover-row); }
+[data-theme='dark'] .scan-indicator { background: #0a1210; }
+[data-theme='dark'] .confirm-card { background: var(--panel); }
+[data-theme='dark'] .confirm-card .amount,
+[data-theme='dark'] .confirm-card div:first-child { color: var(--green-dark); }
+[data-theme='dark'] .confirm-card .code { color: var(--muted); }
+[data-theme='dark'] .danger-zone { background: var(--panel); }
+[data-theme='dark'] .badge-off { background: #24312a; color: var(--muted); }
+[data-theme='dark'] .top-list .bar-wrap { background: #1c2a22; }
+[data-theme='dark'] .label-grid,
+[data-theme='dark'] .label-cell { border-color: var(--line); }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -53,13 +98,13 @@ button { font: inherit; cursor: pointer; }
 
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
 
-input[type='text'], input[type='number'], input[type='date'], textarea, select {
+input[type='text'], input[type='number'], input[type='date'], input[type='month'], textarea, select {
   min-height: 44px;
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   font: inherit;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--ink);
   width: 100%;
 }
@@ -207,3 +252,60 @@ table.data tr:hover td { background: #f6faf7; }
 .danger-zone { border: 2px solid var(--red-soft); border-radius: var(--radius); padding: 16px; background: #fffafa; }
 .empty-state { text-align: center; color: var(--muted); padding: 48px 16px; }
 .empty-state .ico { font-size: 40px; margin-bottom: 8px; }
+
+/* ---------- v1.0.1 ---------- */
+/* Logo + toggle tema di header */
+.header .brand { display: flex; align-items: center; gap: 10px; }
+.header .brand img { width: 38px; height: 38px; object-fit: contain; background: rgba(255, 255, 255, 0.9); border-radius: 50%; padding: 2px; }
+.theme-toggle {
+  min-height: 40px; min-width: 44px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 18px; padding: 4px 12px;
+}
+.theme-toggle:hover { background: rgba(255, 255, 255, 0.22); }
+
+/* Banner pengingat opname + alert stok menipis */
+.notice-banner {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: var(--radius);
+  margin-bottom: 14px; font-weight: 600; border: 1px solid transparent;
+}
+.notice-banner.warn { background: var(--amber-soft); color: var(--amber); border-color: var(--amber); }
+.notice-banner.info { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); }
+.notice-banner .grow { flex: 1; }
+.notice-banner button { min-height: 40px; }
+
+/* Pencarian manual produk (F9) */
+.search-results { max-height: 52vh; overflow: auto; }
+.search-results button.result {
+  display: flex; width: 100%; align-items: center; gap: 12px; text-align: left;
+  padding: 10px 12px; border: none; border-bottom: 1px dashed var(--line); background: transparent; color: inherit;
+}
+.search-results button.result:hover, .search-results button.result.sel { background: var(--green-soft); }
+.search-results .pr { margin-left: auto; font-weight: 700; }
+
+/* Laporan & opname */
+.range-chip { font-size: 13px; color: var(--muted); }
+.opname-diff-pos { color: var(--green-dark); font-weight: 700; }
+.opname-diff-neg { color: var(--red); font-weight: 700; }
+.phase-pill { display: inline-block; padding: 2px 12px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.phase-awal { background: var(--blue-soft); color: var(--blue); }
+.phase-akhir { background: var(--green-soft); color: var(--green-dark); }
+
+/* Grafik kategori: batang horizontal sederhana + donut legenda */
+.cat-list { list-style: none; margin: 0; padding: 0; }
+.cat-list li { padding: 7px 0; border-bottom: 1px dashed var(--line); }
+.cat-list .lbl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.cat-list .bar-wrap { height: 10px; background: var(--hover-row); border-radius: 999px; overflow: hidden; }
+.cat-list .bar { height: 100%; border-radius: 999px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; margin-top: 10px; font-size: 13px; }
+.legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* Tabs (absensi rekap) */
+.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.tabs button {
+  min-height: 44px; padding: 8px 22px; border-radius: 10px 10px 0 0; border: 1px solid var(--line);
+  border-bottom: none; background: var(--panel); font-weight: 700; color: var(--muted);
+}
+.tabs button.active { color: var(--green-dark); background: var(--green-soft); border-color: var(--green); }
+
+/* Tombol struk di overlay konfirmasi */
+.confirm-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }

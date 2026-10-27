@@ -1,6 +1,6 @@
-// F2 — Manajemen produk: CRUD + label (PRD F2, AC7-AC9).
+// F2 — Manajemen produk: CRUD + label (PRD F2, AC7-AC9) + filter kategori (v1.0.1).
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
-import type { Product, ProductFilter } from '@shared/types';
+import type { Category, Product, ProductFilter } from '@shared/types';
 import { rupiah } from '@shared/format';
 import Modal from '../components/Modal';
 import ProductFormModal from '../components/ProductFormModal';
@@ -11,8 +11,11 @@ import { beepOk } from '../lib/beep';
 export default function ProductsScreen(): ReactElement {
   const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ProductFilter>('all');
+  const [categoryId, setCategoryId] = useState('');
+  const [lowThreshold, setLowThreshold] = useState(5);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -22,17 +25,26 @@ export default function ProductsScreen(): ReactElement {
   const [deleteReason, setDeleteReason] = useState('');
 
   const refresh = useCallback(async () => {
-    setProducts(await window.api.productsList({ search, filter }));
-  }, [search, filter]);
+    const [ps, cs, s] = await Promise.all([
+      window.api.productsList({ search, filter, categoryId: categoryId || undefined }),
+      window.api.categoriesList(),
+      window.api.settingsAll(),
+    ]);
+    setProducts(ps);
+    setCategories(cs);
+    setLowThreshold(Number(s.low_stock_alert ?? '5') || 5);
+  }, [search, filter, categoryId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  const catName = (p: Product): string => categories.find((c) => c.id === p.category_id)?.name ?? '—';
+
   const stockBadge = (p: Product): ReactElement => {
     if (!p.is_active) return <span className="badge badge-off">nonaktif</span>;
     if (p.stock === 0) return <span className="badge badge-out">habis</span>;
-    if (p.stock <= p.min_stock) return <span className="badge badge-low">menipis ({p.stock})</span>;
+    if (p.stock <= lowThreshold) return <span className="badge badge-low">menipis ({p.stock})</span>;
     return <span className="badge badge-ok">stok {p.stock}</span>;
   };
 
@@ -82,6 +94,13 @@ export default function ProductsScreen(): ReactElement {
           <option value="active">Aktif saja</option>
           <option value="inactive">Nonaktif saja</option>
         </select>
+        <select style={{ width: 180 }} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="">Semua kategori</option>
+          <option value="none">Tanpa kategori</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
         <button
           className="btn"
           disabled={selected.size === 0}
@@ -117,9 +136,9 @@ export default function ProductsScreen(): ReactElement {
                 </th>
                 <th>Barcode</th>
                 <th>Nama</th>
+                <th>Kategori</th>
                 <th className="num">Harga</th>
                 <th>Stok</th>
-                <th className="num">Min</th>
                 <th style={{ width: 190 }}>Aksi</th>
               </tr>
             </thead>
@@ -142,9 +161,9 @@ export default function ProductsScreen(): ReactElement {
                   <td>
                     <b>{p.name}</b>
                   </td>
+                  <td className="muted">{catName(p)}</td>
                   <td className="num">{rupiah(p.price)}</td>
                   <td>{stockBadge(p)}</td>
-                  <td className="num muted">{p.min_stock}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button

@@ -20,6 +20,12 @@ const api: KasirApi = {
   productByBarcode: (barcode) => ipcRenderer.invoke('products:byBarcode', barcode),
   printLabels: (html, labelCount) => ipcRenderer.invoke('labels:print', html, labelCount),
 
+  // Kategori (v1.0.1)
+  categoriesList: () => ipcRenderer.invoke('categories:list'),
+  categoriesCreate: (name) => ipcRenderer.invoke('categories:create', name),
+  categoriesUpdate: (id, name) => ipcRenderer.invoke('categories:update', id, name),
+  categoriesDelete: (id) => ipcRenderer.invoke('categories:delete', id),
+
   // Siswa & absensi
   pickCsvFile: () => ipcRenderer.invoke('students:pickCsv'),
   importPreviewCsv: (content) => ipcRenderer.invoke('students:importPreview', content),
@@ -28,17 +34,41 @@ const api: KasirApi = {
   attendanceRecord: (studentId) => ipcRenderer.invoke('attendance:record', studentId),
   attendanceToday: () => ipcRenderer.invoke('attendance:today'),
   attendanceByDate: (date) => ipcRenderer.invoke('attendance:byDate', date),
+  attendanceRecap: (month) => ipcRenderer.invoke('attendance:recap', month),
   setActiveCashier: (studentId) => ipcRenderer.invoke('attendance:setActiveCashier', studentId),
   getActiveCashier: () => ipcRenderer.invoke('attendance:getActiveCashier'),
 
-  // Transaksi
+  // Transaksi & struk (v1.0.1)
   createTransaction: (items) => ipcRenderer.invoke('transactions:create', items),
+  transactionItems: (id) => ipcRenderer.invoke('transactions:items', id),
+  printReceipt: (id) => ipcRenderer.invoke('receipts:print', id),
 
   // Dashboard
   dashboardCards: () => ipcRenderer.invoke('dashboard:cards'),
   dashboardTrend: (days) => ipcRenderer.invoke('dashboard:trend', days),
   dashboardTop: (days, by) => ipcRenderer.invoke('dashboard:top', days, by),
   dashboardHourly: (days) => ipcRenderer.invoke('dashboard:hourly', days),
+  dashboardByCategory: (days) => ipcRenderer.invoke('dashboard:byCategory', days),
+  dashboardStats: (days) => ipcRenderer.invoke('dashboard:stats', days),
+  dashboardLowStock: () => ipcRenderer.invoke('dashboard:lowStock'),
+
+  // Laporan (v1.0.1)
+  reportRows: (mode, anchor) => ipcRenderer.invoke('reports:rows', mode, anchor),
+  reportExportCsv: (mode, anchor) => ipcRenderer.invoke('reports:exportCsv', mode, anchor),
+
+  // Stok opname (v1.0.1)
+  opnameReminder: () => ipcRenderer.invoke('opname:reminder'),
+  opnameStart: (phase) => ipcRenderer.invoke('opname:start', phase),
+  opnameCurrent: () => ipcRenderer.invoke('opname:current'),
+  opnameGet: (id) => ipcRenderer.invoke('opname:get', id),
+  opnameSetPhysical: (itemId, qty) => ipcRenderer.invoke('opname:setPhysical', itemId, qty),
+  opnameFillSystem: (id) => ipcRenderer.invoke('opname:fillSystem', id),
+  opnameConfirm: (id) => ipcRenderer.invoke('opname:confirm', id),
+  opnameCancel: (id) => ipcRenderer.invoke('opname:cancel', id),
+  opnameHistory: () => ipcRenderer.invoke('opname:history'),
+
+  // Data dummy / demo (v1.0.2)
+  demoImportDummy: () => ipcRenderer.invoke('demo:importDummy'),
 
   // Pengaturan
   settingsAll: () => ipcRenderer.invoke('settings:all'),

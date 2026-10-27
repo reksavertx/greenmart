@@ -9,17 +9,22 @@ import {
   validateCredentialJson,
   type SheetsClient,
 } from './google';
-import { getAllSettings, setSetting } from '../db/repositories/settings';
+import { getAllSettings, getSetting, setSetting } from '../db/repositories/settings';
 import { addSyncLog } from '../db/repositories/syncLog';
+import { salesDailyItemRows } from '../db/repositories/reports';
+import { unsyncedDone, markSynced } from '../db/repositories/opname';
 import { decryptSecret } from '../util/secret';
-import { toIsoLocal } from '../util/time';
+import { toIsoLocal, localDate, daysAgo } from '../util/time';
 import { isDueForRetry } from './dedupe';
 
 export const TABS = {
   transaksi: { title: 'Transaksi', headers: ['id', 'kode', 'waktu_transaksi', 'nama_kasir', 'kelas_kasir', 'jumlah_item', 'total', 'metode'] },
   detail: { title: 'Detail Transaksi', headers: ['item_id', 'transaction_id', 'kode_transaksi', 'waktu', 'barcode', 'nama_produk', 'harga_satuan', 'qty', 'subtotal'] },
   ringkasan: { title: 'Ringkasan Harian', headers: ['tanggal', 'omzet', 'jumlah_transaksi', 'item_terjual', 'updated_at'] },
-  produk: { title: 'Produk', headers: ['id', 'barcode', 'nama', 'harga', 'stok', 'aktif', 'updated_at'] },
+  produk: { title: 'Produk', headers: ['id', 'barcode', 'nama', 'harga', 'stok', 'aktif', 'updated_at', 'kategori'] },
+  // v1.0.1
+  rekap: { title: 'Rekap Harian Item', headers: ['tanggal', 'barcode', 'nama', 'kategori', 'qty', 'omzet'] },
+  opname: { title: 'Stok Opname', headers: ['item_id', 'opname_id', 'tanggal', 'fase', 'petugas', 'barcode', 'nama_produk', 'harga', 'stok_sistem', 'stok_fisik', 'selisih_qty', 'nilai_selisih'] },
 } as const;
 
 type TabKey = keyof typeof TABS;
@@ -63,6 +68,8 @@ export interface SyncCounts {
   summaries: number;
   productsAdded: number;
   productsUpdated: number;
+  rekapRows: number;
+  opnameRows: number;
 }
 
 export interface SyncResult {
@@ -72,7 +79,7 @@ export interface SyncResult {
   counts: SyncCounts;
 }
 
-const EMPTY_COUNTS: SyncCounts = { transactions: 0, details: 0, summaries: 0, productsAdded: 0, productsUpdated: 0 };
+const EMPTY_COUNTS: SyncCounts = { transactions: 0, details: 0, summaries: 0, productsAdded: 0, productsUpdated: 0, rekapRows: 0, opnameRows: 0 };
 
 function colLetter(n: number): string {
   let s = '';
@@ -176,38 +183,62 @@ export async function ensureTabs(client: SheetsClient): Promise<void> {
     if (title) existing.add(title);
   }
   const missing = (Object.keys(TABS) as TabKey[]).filter((k) => !existing.has(TABS[k].title));
-  if (!missing.length) return;
-
-  const addRes = await client.sheets.spreadsheets.batchUpdate({
-    spreadsheetId: client.spreadsheetId,
-    requestBody: {
-      requests: missing.map((k) => ({ addSheet: { properties: { title: TABS[k].title } } })),
-    },
-  });
 
   const boldReqs: sheets_v4.Schema$Request[] = [];
-  const replies = addRes.data.replies ?? [];
-  replies.forEach((r, _i) => {
-    const sheetId = r.addSheet?.properties?.sheetId;
-    if (typeof sheetId === 'number') {
-      boldReqs.push({
-        repeatCell: {
-          range: { sheetId },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold',
-        },
-      });
-    }
-  });
+  const headerWrites: Promise<unknown>[] = [];
 
-  const headerWrites = missing.map((k) =>
-    client.sheets.spreadsheets.values.update({
+  if (missing.length) {
+    const addRes = await client.sheets.spreadsheets.batchUpdate({
       spreadsheetId: client.spreadsheetId,
-      range: `'${TABS[k].title}'!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [[...TABS[k].headers]] },
-    }),
-  );
+      requestBody: {
+        requests: missing.map((k) => ({ addSheet: { properties: { title: TABS[k].title } } })),
+      },
+    });
+    const replies = addRes.data.replies ?? [];
+    replies.forEach((r) => {
+      const sheetId = r.addSheet?.properties?.sheetId;
+      if (typeof sheetId === 'number') {
+        boldReqs.push({
+          repeatCell: {
+            range: { sheetId },
+            cell: { userEnteredFormat: { textFormat: { bold: true } } },
+            fields: 'userEnteredFormat.textFormat.bold',
+          },
+        });
+      }
+    });
+    for (const k of missing) {
+      headerWrites.push(
+        client.sheets.spreadsheets.values.update({
+          spreadsheetId: client.spreadsheetId,
+          range: `'${TABS[k].title}'!A1`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [[...TABS[k].headers]] },
+        }),
+      );
+    }
+  }
+
+  // Self-heal header tab existing (mis. tab Produk dari v1.0.0 belum punya kolom 'kategori').
+  for (const k of Object.keys(TABS) as TabKey[]) {
+    if (missing.includes(k)) continue;
+    const headers = TABS[k].headers;
+    const cur = await readRowsAt(client, TABS[k].title, 1, headers.length);
+    const curRow = cur[0] ?? [];
+    const equal =
+      headers.every((h, i) => (curRow[i] ?? '').trim() === h) &&
+      curRow.length <= headers.length;
+    if (!equal) {
+      headerWrites.push(
+        client.sheets.spreadsheets.values.update({
+          spreadsheetId: client.spreadsheetId,
+          range: `'${TABS[k].title}'!A1`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [[...headers]] },
+        }),
+      );
+    }
+  }
 
   if (boldReqs.length) {
     await client.sheets.spreadsheets.batchUpdate({
@@ -216,6 +247,20 @@ export async function ensureTabs(client: SheetsClient): Promise<void> {
     });
   }
   await Promise.all(headerWrites);
+}
+
+/** Baca sebagian baris pertama (untuk cek header). */
+async function readRowsAt(
+  client: SheetsClient,
+  tabTitle: string,
+  rowStart: number,
+  colCount: number,
+): Promise<string[][]> {
+  const res = await client.sheets.spreadsheets.values.get({
+    spreadsheetId: client.spreadsheetId,
+    range: `'${tabTitle}'!A${rowStart}:${colLetter(colCount)}${rowStart}`,
+  });
+  return res.data.values ?? [];
 }
 
 async function appendValues(client: SheetsClient, tabTitle: string, values: string[][]): Promise<void> {
@@ -436,7 +481,8 @@ export async function runSync(deps: SyncDeps): Promise<SyncResult> {
   // 7. Produk — snapshot terkini, upsert by id (ADR: dipilih upsert, bukan clear+rewrite).
   try {
     const products = db.prepare('SELECT * FROM products ORDER BY name').all() as Product[];
-    const rows = await readRows(client, TABS.produk.title, 7);
+    const catStmt = db.prepare('SELECT name FROM categories WHERE id = ?');
+    const rows = await readRows(client, TABS.produk.title, 8);
     const byId = new Map<string, { row: number; vals: string[] }>();
     rows.forEach((r, i) => {
       if (r[0]) byId.set(r[0], { row: i + 2, vals: r });
@@ -444,10 +490,11 @@ export async function runSync(deps: SyncDeps): Promise<SyncResult> {
     const updates: { range: string; values: string[][] }[] = [];
     const appends: string[][] = [];
     for (const p of products) {
-      const vals = [p.id, p.barcode, p.name, String(p.price), String(p.stock), p.is_active ? '1' : '0', p.updated_at];
+      const cat = p.category_id ? ((catStmt.get(p.category_id) as { name: string } | undefined)?.name ?? '') : '';
+      const vals = [p.id, p.barcode, p.name, String(p.price), String(p.stock), p.is_active ? '1' : '0', p.updated_at, cat];
       const ex = byId.get(p.id);
       if (!ex) appends.push(vals);
-      else if (!valsEqual(ex.vals, vals)) updates.push({ range: `'${TABS.produk.title}'!A${ex.row}:G${ex.row}`, values: [vals] });
+      else if (!valsEqual(ex.vals, vals)) updates.push({ range: `'${TABS.produk.title}'!A${ex.row}:H${ex.row}`, values: [vals] });
     }
     if (appends.length) await appendValues(client, TABS.produk.title, appends);
     if (updates.length) await batchUpdateRows(client, updates);
@@ -457,6 +504,78 @@ export async function runSync(deps: SyncDeps): Promise<SyncResult> {
   } catch (err) {
     const { cls, message } = classifySyncError(err);
     addSyncLog(db, cls === 'config' ? 'auth' : 'network', 'error', `Produk: ${message}`);
+    if (cls === 'config') {
+      setSetting(db, 'last_sync_at', nowIso);
+      return { ok: false, configError: true, message, counts };
+    }
+  }
+
+  // 8. Rekap Harian Item — upsert by (tanggal, barcode). Rentang: report_sync_from .. hari ini
+  //    (default pertama kali: 30 hari terakhir). Setelah sukses: report_sync_from = kemarin,
+  //    sehingga transaksi malam hari tetap ketangkap di run berikutnya.
+  try {
+    const from = getSetting(db, 'report_sync_from', '') || daysAgo(30);
+    const to = localDate();
+    const dailyRows = salesDailyItemRows(db, from, to);
+    if (dailyRows.length) {
+      const rows = await readRows(client, TABS.rekap.title, 6);
+      const keyOf = (r: string[]): string => `${(r[0] ?? '').trim()}|${(r[1] ?? '').trim()}`;
+      const byKey = new Map<string, number>();
+      rows.forEach((r, i) => {
+        if (r[0] && r[1]) byKey.set(keyOf(r), i + 2);
+      });
+      const updates: { range: string; values: string[][] }[] = [];
+      const appends: string[][] = [];
+      for (const dr of dailyRows) {
+        const vals = [dr.local_date, dr.barcode, dr.product_name, dr.category_name ?? '', String(dr.qty), String(dr.revenue)];
+        const row = byKey.get(`${dr.local_date}|${dr.barcode}`);
+        if (!row) appends.push(vals);
+        else if (!valsEqual(rows[row - 2], vals)) updates.push({ range: `'${TABS.rekap.title}'!A${row}:F${row}`, values: [vals] });
+      }
+      if (appends.length) await appendValues(client, TABS.rekap.title, appends);
+      if (updates.length) await batchUpdateRows(client, updates);
+      counts.rekapRows = appends.length + updates.length;
+      addSyncLog(db, 'rekap', 'ok', `Rekap harian: ${appends.length} baru, ${updates.length} diperbarui.`);
+    }
+    setSetting(db, 'report_sync_from', daysAgo(1));
+  } catch (err) {
+    const { cls, message } = classifySyncError(err);
+    addSyncLog(db, cls === 'config' ? 'auth' : 'network', 'error', `Rekap: ${message}`);
+    if (cls === 'config') {
+      setSetting(db, 'last_sync_at', nowIso);
+      return { ok: false, configError: true, message, counts };
+    }
+  }
+
+  // 9. Stok Opname — sesi done yang belum terkirim, append-only dedup by item_id (self-heal).
+  try {
+    const done = unsyncedDone(db);
+    if (done.length) {
+      const rows = await readRows(client, TABS.opname.title, 12);
+      const idSet = new Set(rows.map((r) => r[0]).filter(Boolean));
+      const appends: string[][] = [];
+      const syncedHeads: string[] = [];
+      for (const h of done) {
+        let allPresent = true;
+        for (const it of h.items) {
+          if (idSet.has(it.id)) continue;
+          allPresent = false;
+          appends.push([
+            it.id, h.id, h.local_date, h.phase, h.petugas ?? '', it.barcode, it.product_name,
+            String(it.price), String(it.system_stock), String(it.physical_stock ?? ''),
+            String(it.diff_qty ?? ''), String(it.diff_value ?? ''),
+          ]);
+        }
+        if (allPresent) syncedHeads.push(h.id); // sudah terkirim (crash mid-sync) — tandai saja
+      }
+      if (appends.length) await appendValues(client, TABS.opname.title, appends);
+      markSynced(db, [...syncedHeads, ...done.filter((h) => h.items.every((it) => idSet.has(it.id) || appends.some((a) => a[0] === it.id))).map((h) => h.id)]);
+      counts.opnameRows = appends.length;
+      addSyncLog(db, 'opname', 'ok', `Stok opname: ${done.length} sesi, ${appends.length} baris terkirim.`);
+    }
+  } catch (err) {
+    const { cls, message } = classifySyncError(err);
+    addSyncLog(db, cls === 'config' ? 'auth' : 'network', 'error', `Opname: ${message}`);
     if (cls === 'config') {
       setSetting(db, 'last_sync_at', nowIso);
       return { ok: false, configError: true, message, counts };

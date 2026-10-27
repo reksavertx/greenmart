@@ -37,7 +37,7 @@ export class SyncManager {
 
   async run(manual: boolean): Promise<SyncResult> {
     if (this.running) {
-      return { ok: false, configError: false, message: 'Sinkronisasi sedang berjalan.', counts: { transactions: 0, details: 0, summaries: 0, productsAdded: 0, productsUpdated: 0 } };
+      return { ok: false, configError: false, message: 'Sinkronisasi sedang berjalan.', counts: { transactions: 0, details: 0, summaries: 0, productsAdded: 0, productsUpdated: 0, rekapRows: 0, opnameRows: 0 } };
     }
     this.setRunning(true);
     try {

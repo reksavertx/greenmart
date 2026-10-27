@@ -10,6 +10,11 @@ files:
   - out/**
   - package.json
 
+# Logo sekolah disalin ke resources/ installer — dibaca main process utk struk & header.
+extraResources:
+  - from: resources/logo-sekolah.webp
+    to: logo-sekolah.webp
+
 # better-sqlite3 berisi .node native — tidak boleh di dalam arsip asar
 asarUnpack:
   - "**/node_modules/better-sqlite3/**"
