@@ -1,0 +1,40 @@
+appId: com.greenmart.kasir
+productName: GreenMart Kasir
+copyright: Koperasi Sekolah
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out/**
+  - package.json
+
+# better-sqlite3 berisi .node native — tidak boleh di dalam arsip asar
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  shortcutName: GreenMart Kasir
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Office
+  icon: resources/icons
+  maintainer: Koperasi Sekolah
+  synopsis: Kasir Koperasi Sekolah
+  description: Aplikasi kasir offline-first untuk koperasi/kantin sekolah dengan sinkronisasi Google Sheets.
+  syncDesktopName: true

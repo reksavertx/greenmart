@@ -1,0 +1,52 @@
+{
+  "name": "greenmart",
+  "productName": "GreenMart Kasir",
+  "version": "1.0.0",
+  "description": "Aplikasi kasir (POS) koperasi sekolah — offline-first, SQLite lokal, sinkronisasi Google Sheets",
+  "main": "out/main/index.js",
+  "homepage": "https://example.com/greenmart",
+  "author": "Koperasi Sekolah",
+  "license": "MIT",
+  "private": true,
+  "desktopName": "greenmart-kasir.desktop",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint .",
+    "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
+    "start": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "npm run build && electron-builder --win --linux",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "gen:icon": "node scripts/gen-icon.cjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "date-fns": "^4.4.0",
+    "electron-log": "^5.4.4",
+    "googleapis": "^188.0.0",
+    "jsbarcode": "^3.12.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.19.2",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "cross-env": "^10.1.0",
+    "electron": "^44.9.3",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
