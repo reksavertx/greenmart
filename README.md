@@ -12,13 +12,13 @@ Dibangun dengan **Electron + electron-vite + React + TypeScript (strict)**, data
 
 | Layar (tombol) | Isi |
 |---|---|
-| **Kasir (F1)** | Scan barcode → keranjang → **↓ + Enter** bayar tunai instan (uang pas). Scan NISN = absensi + kasir aktif. Barcode tak dikenal → langsung bisa didaftarkan. **F9** cari produk manual (nama/kode 3–5 digit) untuk UMKM tanpa barcode. Tombol **🧾 Cetak Struk** di overlay konfirmasi (thermal 58/80 mm, logo + nama kasir jaga otomatis). Alert stok menipis global. |
+| **Kasir (F1)** | Scan barcode → keranjang → **↓ + Enter** bayar tunai instan (uang pas). Scan NISN = absensi + kasir aktif. Barcode tak dikenal → langsung bisa didaftarkan. **F9** cari produk manual (nama/kode 3–5 digit) untuk UMKM tanpa barcode. Tombol **🧾 Cetak Struk** di overlay konfirmasi (thermal 58/80 mm, logo + nama kasir jaga otomatis, **pilih printer langsung di overlay** — v1.0.3). Alert stok menipis global. |
 | **Produk (F2)** | CRUD produk + **kategori**, pencarian, badge stok menipis/habis (batas global), filter kategori, soft/hard delete sesuai riwayat, generate & cetak **label Code 128**. |
 | **Absensi (F3)** | Import CSV siswa (toleran: tab/koma, BOM, apostrof NISN, header), scan NISN → kartu identitas + log hadir, riwayat per tanggal, **rekap kehadiran bulanan** (jumlah hari, rata-rata jam datang), set kasir aktif. |
 | **Dashboard (F4)** | Omzet/transaksi/item hari ini, **rata-rata omzet/hari**, grafik garis omzet + kuantitas, jam ramai, **penjualan per kategori (batang + lingkaran)**, modus produk terlaris Top 7, panel stok menipis. |
 | **Laporan (F5)** | Laporan penjualan **harian/mingguan/bulanan** per item (qty + omzet + kategori), navigasi periode, **ekspor CSV** (Excel-friendly), rekap harian per item tersinkron ke tab `Rekap Harian Item`. |
 | **Stok Opname (F6)** | Catat stok fisik vs sistem (selisih qty + nilai) — **hanya mencatat, tidak mengubah stok**. Siklus jaga X hari: opname *awal* pagi hari ke-1, opname *akhir* di hari terakhir (pengingat otomatis di banner). Petugas otomatis dari absensi hari itu. Sinkron ke tab `Stok Opname`. |
-| **Pengaturan** | Nama toko, **kategori produk (CRUD)**, batas alert stok menipis, siklus opname, lebar struk, **tema terang/gelap**, interval sync, **Setup Wizard kredensial Google**, folder backup, danger zone, **import data demo (v1.0.2)**. |
+| **Pengaturan** | Nama toko, **kategori produk (CRUD)**, batas alert stok menipis, siklus opname, lebar struk, **tema terang/gelap**, interval sync, **Setup Wizard kredensial Google**, folder backup, danger zone, **import data demo (v1.0.2)**, **printer struk & label + tes cetak (v1.0.3)**. |
 | **F8** | Dialog sinkronisasi: status pending/failed, error terakhir, retry, buka spreadsheet. |
 
 Peta keyboard lengkap: PRD §8 + tambahan v1.0.1 (`F5` Laporan, `F6` Opname, `F9` cari produk; dipertahankan: `↓+Enter` bayar, `Del` hapus baris, `+`/`−` qty, `Esc` tutup dialog).
@@ -110,6 +110,19 @@ Tanpa scanner pun bisa dipakai: ketik barcode manual di layar Kasir lalu Enter.
 | Database | `userData/kasir.db` (Windows: `%APPDATA%/GreenMart Kasir/kasir.db`) |
 | Backup harian (7 terakhir) | `userData/backups/` (bisa diubah di Pengaturan) |
 | Log | `userData/logs/main.log` |
+
+## Printer & cetak struk (v1.0.3)
+
+- **Pengaturan → Printer struk & label**: pilih printer terpasang, atau "Printer default sistem"
+  (cetak langsung tanpa dialog — mode kasir), atau "Pilih saat cetak (dialog print)".
+- Tombol **🖨 Tes Cetak** mencetak halaman tes berbentuk struk ke printer yang dipilih —
+  pakai ini untuk menguji konfigurasi tanpa transaksi.
+- Overlay konfirmasi kasir punya **dropdown printer** (default mengikuti Pengaturan) di samping
+  tombol Cetak Struk — bisa diganti sekali jalan tanpa membuka Pengaturan.
+- Bila printer yang tersimpan tercabut/dihapus, aplikasi otomatis membuka dialog print agar
+  transaksi tidak gagal senyap.
+- Setting tersimpan di key `receipt_printer` (`''` = default sistem, `__dialog__` = selalu tanya,
+  selain itu = nama printer sistem).
 
 ## Data demo (presentasi) — v1.0.2
 

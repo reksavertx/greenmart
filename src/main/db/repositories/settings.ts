@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   low_stock_alert: '5', // batas global alert stok menipis
   opname_cycle_days: '3', // periode jaga X hari
   receipt_width_mm: '58', // lebar kertas struk thermal
+  receipt_printer: '', // v1.0.3: nama printer struk/label; '' = default sistem, '__dialog__' = dialog print
   theme: 'system', // light | dark | system
 };
 

@@ -18,7 +18,11 @@ const api: KasirApi = {
   productDelete: (id, mode) => ipcRenderer.invoke('products:delete', id, mode),
   productHasSales: (id) => ipcRenderer.invoke('products:hasSales', id),
   productByBarcode: (barcode) => ipcRenderer.invoke('products:byBarcode', barcode),
-  printLabels: (html, labelCount) => ipcRenderer.invoke('labels:print', html, labelCount),
+  printLabels: (html, labelCount, deviceChoice) => ipcRenderer.invoke('labels:print', html, labelCount, deviceChoice),
+
+  // Printer (v1.0.3)
+  printersList: () => ipcRenderer.invoke('printers:list'),
+  testPrint: (deviceChoice) => ipcRenderer.invoke('receipts:testPrint', deviceChoice),
 
   // Kategori (v1.0.1)
   categoriesList: () => ipcRenderer.invoke('categories:list'),
@@ -41,7 +45,7 @@ const api: KasirApi = {
   // Transaksi & struk (v1.0.1)
   createTransaction: (items) => ipcRenderer.invoke('transactions:create', items),
   transactionItems: (id) => ipcRenderer.invoke('transactions:items', id),
-  printReceipt: (id) => ipcRenderer.invoke('receipts:print', id),
+  printReceipt: (id, deviceChoice) => ipcRenderer.invoke('receipts:print', id, deviceChoice),
 
   // Dashboard
   dashboardCards: () => ipcRenderer.invoke('dashboard:cards'),

@@ -55,13 +55,22 @@
 - [x] Import via Pengaturan → dialog file → validasi → auto-backup → import transaksional (rollback total saat error).
 - [x] Transaksi dummy = riwayat (stok tak berkurang), ditandai `synced` agar tidak mendorong riwayat demo ke Sheets.
 
+## Acceptance Criteria v1.0.3 (perbaikan print)
+
+- [x] **Bug dialog print tak muncul** (window tersembunyi + GTK/Wayland) → mode dialog memakai window terlihat kecil; mode silent memakai `silent:true + deviceName` dari window tersembunyi.
+- [x] **Window tersembunyi tidak lagi menumpuk** — timeout guard (muat 30 dtk, cetak 90 dtk) + `destroy()` di `finally`.
+- [x] Kegagalan cetak terlihat: callback `(success, failureReason)` diperiksa → toast error (batal = bukan error).
+- [x] Pemilihan printer: `printers:list` (getPrintersAsync), setting `receipt_printer`, dropdown di Pengaturan + overlay Kasir, tombol **🖨 Tes Cetak**.
+- [x] Printer hilang → fallback otomatis ke dialog print + notice (tidak gagal senyap).
+- [x] `tests/print.test.ts` — `resolvePrintDevice`: default sistem, printer spesifik, dialog, override sesi, fallback printer hilang.
+
 ## DoD lain (PRD §12)
 
 - [x] `tsc` lulus (node + web, strict)
 - [x] ESLint lulus tanpa error
-- [x] Unit test lulus (81 test): parser CSV, routing scan, dedup ID + backoff, recompute daily summaries, rupiah, smoke test file-DB (WAL persist + backup + alur lengkap PRD §13), periode & opname, kategori, laporan + CSV, rekap absensi, migrasi v1→v2, **import data demo**
+- [x] Unit test lulus (93 test): parser CSV, routing scan, dedup ID + backoff, recompute daily summaries, rupiah, smoke test file-DB (WAL persist + backup + alur lengkap PRD §13), periode & opname, kategori, laporan + CSV, rekap absensi, migrasi v1→v2, **import data demo**, **strategi printer**
 - [ ] AC1–AC34 diverifikasi manual & dicatat (tabel di atas — kolom ⏳ menunggu smoke test PC target)
-- [x] Installer **Linux** di-build & native module ter-pack: `release/GreenMart Kasir-1.0.2.AppImage` + `release/greenmart_1.0.2_amd64.deb` — `better_sqlite3.node` terverifikasi di dalam keduanya
+- [x] Installer **Linux** di-build & native module ter-pack: `release/GreenMart Kasir-1.0.3.AppImage` + `release/greenmart_1.0.3_amd64.deb` — `better_sqlite3.node` terverifikasi di dalam keduanya
 - [ ] Installer **Windows** (NSIS): tidak dapat di-cross-build dari Linux — `@electron/rebuild`/node-gyp tidak mendukung cross-compile `better-sqlite3`. Bangun di mesin Windows: `npm install` → `npx electron-builder install-app-deps` → `npm run dist:win` (skrip sudah tersedia; konfigurasi NSIS ada di `electron-builder.yml`), lalu smoke-test .exe di PC target
 - [x] Tidak ada kredensial di source code (verifikasi grep di bawah)
 - [x] README: setup Google Cloud, build, konfigurasi scanner, cara pakai per fitur (+ logo sekolah, laporan, opname)

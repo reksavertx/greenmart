@@ -1,6 +1,8 @@
 // F1 — Layar Kasir: scan -> keranjang -> bayar tunai instan (PRD F1) + pencarian manual F9 (v1.0.1).
+// v1.0.3: pilih printer struk langsung di overlay konfirmasi (default dari Pengaturan).
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { PaymentResult, Product, ScanStudentRef, Student } from '@shared/types';
+import { PRINTER_DIALOG, type PrinterLite } from '@shared/print';
 import { rupiah } from '@shared/format';
 import { useScanEngine } from '../lib/useScanEngine';
 import { beepCash, beepError, beepOk, beepWarn } from '../lib/beep';
@@ -38,6 +40,9 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
   const [unknown, setUnknown] = useState<string | null>(null);
   const [registerBarcode, setRegisterBarcode] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  // Printer struk (v1.0.3): null = belum termuat (ikuti setting Pengaturan).
+  const [printers, setPrinters] = useState<PrinterLite[]>([]);
+  const [printerChoice, setPrinterChoice] = useState<string | null>(null);
   const confirmTimer = useRef<number | null>(null);
   // v1.0.1: pencarian manual (F9) + alert stok menipis global
   const [manualOpen, setManualOpen] = useState(false);
@@ -184,6 +189,21 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
     [removeLine, selIdx, toast],
   );
 
+  /** Muat daftar printer + setting printer aktif (dipanggil saat mount & saat overlay muncul). */
+  const loadPrinters = useCallback(async (): Promise<void> => {
+    try {
+      const [list, settings] = await Promise.all([window.api.printersList(), window.api.settingsAll()]);
+      setPrinters(list);
+      setPrinterChoice(settings.receipt_printer ?? '');
+    } catch {
+      setPrinterChoice((c) => c ?? '');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPrinters();
+  }, [loadPrinters]);
+
   // ---- Bayar tunai instan (uang pas) ----
   const pay = useCallback(async () => {
     const cur = linesRef.current;
@@ -196,6 +216,7 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
       setSelZone('cart');
       setSelIdx(-1);
       setConfirm(res);
+      void loadPrinters(); // segarkan daftar printer (mis. baru dicolok) untuk overlay
       if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
       confirmTimer.current = window.setTimeout(() => setConfirm(null), 3000);
     } catch (e) {
@@ -204,8 +225,7 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
     } finally {
       setPaying(false);
     }
-  }, [toast]);
-
+  }, [toast, loadPrinters]);
   const { buffer } = useScanEngine({
     active: true,
     blocked,
@@ -238,14 +258,19 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  /** Cetak struk transaksi terakhir (dari overlay konfirmasi). */
-  const printReceipt = useCallback(async (id: string): Promise<void> => {
-    try {
-      await window.api.printReceipt(id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Gagal mencetak struk.');
-    }
-  }, [toast]);
+  /** Cetak struk transaksi terakhir (dari overlay konfirmasi) — v1.0.3: pilih printer. */
+  const printReceipt = useCallback(
+    async (id: string): Promise<void> => {
+      try {
+        const msg = await window.api.printReceipt(id, printerChoice ?? undefined);
+        toast.ok(msg);
+      } catch (e) {
+        beepError();
+        toast.error(e instanceof Error ? e.message : 'Gagal mencetak struk.');
+      }
+    },
+    [toast, printerChoice],
+  );
 
   const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
 
@@ -373,6 +398,20 @@ export default function KasirScreen({ onCashierChanged, activeCashier }: Props):
               >
                 Tutup
               </button>
+              <select
+                value={printerChoice ?? ''}
+                onChange={(e) => setPrinterChoice(e.target.value)}
+                title="Printer struk"
+                style={{ maxWidth: 210 }}
+              >
+                <option value="">🖨 Default sistem</option>
+                {printers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.displayName || p.name}
+                  </option>
+                ))}
+                <option value={PRINTER_DIALOG}>Pilih saat cetak (dialog)…</option>
+              </select>
               <button
                 className="btn btn-primary"
                 onClick={() => void printReceipt(confirm.id)}

@@ -1,5 +1,6 @@
 // Tipe bersama: main process, preload, dan renderer.
 import type { DummyImportResult } from './dummyData';
+import type { PrinterLite } from './print';
 
 export type SyncStatus = 'pending' | 'synced' | 'failed';
 export type ScanMode = 'kasir' | 'absensi';
@@ -294,6 +295,7 @@ export type {
   DummyOpname,
 } from './dummyData';
 export type { DummyImportCounts, DummyImportResult } from './dummyData';
+export type { PrinterLite, PrintDeviceResolution } from './print';
 
 export type ProductFilter = 'all' | 'active' | 'inactive';
 
@@ -346,7 +348,14 @@ export interface KasirApi {
   productHasSales(id: string): Promise<boolean>;
   productByBarcode(barcode: string): Promise<Product | null>;
   /** HTML label lengkap (SVG Code 128 sudah dirender di renderer) dikirim ke main untuk dicetak. */
-  printLabels(html: string, labelCount: number): Promise<void>;
+  /** deviceChoice: '' = default sistem, '__dialog__' = dialog print, atau nama printer (lihat @shared/print). */
+  printLabels(html: string, labelCount: number, deviceChoice?: string): Promise<string>;
+
+  // Printer (v1.0.3)
+  /** Daftar printer terpasang untuk dropdown pemilihan. */
+  printersList(): Promise<PrinterLite[]>;
+  /** Cetak halaman tes (bentuk struk) ke printer pilihan — uji konfigurasi tanpa transaksi. */
+  testPrint(deviceChoice?: string): Promise<string>;
 
   // Kategori (v1.0.1)
   categoriesList(): Promise<Category[]>;
@@ -372,7 +381,8 @@ export interface KasirApi {
   /** Item snapshot satu transaksi — untuk struk (v1.0.1). */
   transactionItems(transactionId: string): Promise<ReceiptItemLine[]>;
   /** Cetak struk thermal; main process menyusun HTML (logo, kasir jaga, lebar kertas). */
-  printReceipt(transactionId: string): Promise<void>;
+  /** Cetak struk; kembalikan pesan sukses untuk toast. deviceChoice sama seperti printLabels. */
+  printReceipt(transactionId: string, deviceChoice?: string): Promise<string>;
 
   // Dashboard
   dashboardCards(): Promise<DashboardCards>;

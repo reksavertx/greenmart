@@ -2,7 +2,8 @@
 // kategori produk, batas alert stok menipis, lebar struk, siklus opname, tema.
 // v1.0.2: panel import data dummy/demo.
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import type { BackupInfo, Category, DummyImportResult } from '@shared/types';
+import type { BackupInfo, Category, DummyImportResult, PrinterLite } from '@shared/types';
+import { PRINTER_DIALOG } from '@shared/print';
 import Modal from '../components/Modal';
 import { useToast } from '../lib/toast';
 
@@ -27,6 +28,8 @@ export default function SettingsScreen(): ReactElement {
   const [confirmName, setConfirmName] = useState('');
   const [demoConfirm, setDemoConfirm] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
+  const [printers, setPrinters] = useState<PrinterLite[]>([]);
+  const [testPrintBusy, setTestPrintBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [s, g, b, c] = await Promise.all([
@@ -41,9 +44,34 @@ export default function SettingsScreen(): ReactElement {
     setCategories(c);
   }, []);
 
+  /** Daftar printer sistem untuk dropdown (v1.0.3) — dimuat terpisah, gagal = daftar kosong. */
+  const loadPrinters = useCallback(async () => {
+    try {
+      setPrinters(await window.api.printersList());
+    } catch {
+      setPrinters([]);
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void loadPrinters();
+  }, [loadPrinters]);
+
+  /** Cetak halaman tes ke printer yang sedang dipilih di dropdown. */
+  const runTestPrint = async (): Promise<void> => {
+    setTestPrintBusy(true);
+    try {
+      toast.ok(await window.api.testPrint(settings.receipt_printer ?? ''));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Tes cetak gagal.');
+    } finally {
+      setTestPrintBusy(false);
+    }
+  };
 
   const saveField = async (key: string, value: string): Promise<void> => {
     await window.api.settingsSet(key, value);
@@ -179,6 +207,26 @@ export default function SettingsScreen(): ReactElement {
                 <option value="dark">Gelap</option>
               </select>
             </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'end' }}>
+            <label className="field">
+              <span>Printer struk &amp; label (v1.0.3)</span>
+              <select
+                value={settings.receipt_printer ?? ''}
+                onChange={(e) => void saveField('receipt_printer', e.target.value)}
+              >
+                <option value="">🖨 Printer default sistem</option>
+                {printers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.displayName || p.name}
+                  </option>
+                ))}
+                <option value={PRINTER_DIALOG}>Pilih saat cetak (dialog print)…</option>
+              </select>
+            </label>
+            <button className="btn" disabled={testPrintBusy} onClick={() => void runTestPrint()} title="Cetak halaman tes berbentuk struk">
+              {testPrintBusy ? 'Mencetak…' : '🖨 Tes Cetak'}
+            </button>
           </div>
           <label className="field">
             <span>Interval sinkronisasi otomatis (menit)</span>

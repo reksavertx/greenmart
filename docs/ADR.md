@@ -124,3 +124,29 @@ nasional akurat — generator dijalankan ulang untuk menyegarkan window 75 hari.
 **Alasan:** presentasi butuh data yang terlihat nyata (pola jam ramai, Sabtu–Minggu & hari libur
 nasional kosong, opname dengan selisih wajar) tanpa merusak data operasional; merge + dedup by ID
 membuat import idempoten sehingga salah klik dua kali tidak menduplikasi data.
+
+## ADR-14: Cetak struk/label (v1.0.3) — silent by default, window terlihat untuk dialog
+
+**Keputusan:** rombak `printHtml` di `src/main/ipc/register.ts`:
+
+| Mode | Window | `webContents.print` | Pemakaian |
+|---|---|---|---|
+| Silent (default) | `show:false` + `stayHidden:true` | `{ silent:true, deviceName }` | Printer terpilih di setting `receipt_printer` / dropdown overlay kasir |
+| Dialog | **Terlihat** (kecil, `skipTaskbar`, pojok kanan-bawah) | `{ silent:false }` | Pilihan "Pilih saat cetak" / fallback printer hilang |
+
+**Alasan:**
+- Bug v1.0.1: dialog print GTK (Linux/Wayland) **tidak muncul dari window tersembunyi**, dan
+  callback `print()` tidak pernah terpanggil → promise menggantung, window tersembunyi menumpuk,
+  kegagalan senyap. Dialog kini dibuat dari window yang ter-mapping.
+- POS-style: cetak langsung (tanpa dialog) ke printer struk yang sama tiap transaksi — cepat;
+  dialog tetap tersedia sebagai pilihan eksplisit.
+- Tidak lagi mengandalkan urutan `loadURL` vs `did-finish-load` (race lama); promise load settle
+  di event mana pun yang datang lebih dulu.
+- `withTimeout` (muat 30 dtk, cetak 90 dtk) + `destroy()` di `finally` menjamin window selalu
+  dibersihkan; callback `(success, failureReason)` diperiksa — batal = bukan error.
+- Jeda ±200 ms sebelum `print()` dan ±400 ms sebelum `destroy()` (silent) mengikuti
+  electron/electron#39179 (job bisa terpotong bila terlalu cepat).
+- Pemilihan printer dipusatkan di helper murni `resolvePrintDevice` (`@shared/print`):
+  pilihan sesi > setting > default sistem; printer hilang → fallback dialog + notice.
+  Diuji di `tests/print.test.ts`. Catatan: Electron 44 `PrinterInfo` tidak lagi memuat
+  `isDefault`/`status` — dropdown hanya memakai `name`/`displayName`/`description`.

@@ -69,8 +69,8 @@ export default function LabelDialog({ products, onClose }: Props): ReactElement 
     if (!labels.length) return void toast.warn('Tidak ada label untuk dicetak.');
     setPrinting(true);
     try {
-      await window.api.printLabels(buildHtml(), labels.length);
-      toast.ok(`Perintah cetak ${labels.length} label dikirim.`);
+      const msg = await window.api.printLabels(buildHtml(), labels.length);
+      toast.ok(msg);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gagal mencetak label.');
     } finally {

@@ -1,5 +1,5 @@
 // Registrasi seluruh IPC handler — satu-satunya jalan renderer -> data (PRD §5.4).
-import { ipcMain, dialog, shell, BrowserWindow, app } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow, app, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { DB } from '../db/database';
@@ -15,6 +15,7 @@ import type {
   ReceiptData,
   ReceiptItemLine,
 } from '@shared/types';
+import { resolvePrintDevice, type PrintDeviceResolution, type PrinterLite } from '@shared/print';
 import * as products from '../db/repositories/products';
 import * as students from '../db/repositories/students';
 import * as attendance from '../db/repositories/attendance';
@@ -43,18 +44,133 @@ export interface IpcContext {
   defaultBackupDir: string;
 }
 
-/** Cetak HTML label (SVG barcode sudah dirender di renderer) via window tersembunyi. */
-async function printHtml(html: string): Promise<void> {
-  const win = new BrowserWindow({ show: false, width: 860, height: 1100 });
+/** Jeda kecil — memberi waktu render/spooler (issue electron/electron#39179). */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Bungkus promise dengan batas waktu — mencegah IPC menggantung selamanya. */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e instanceof Error ? e : new Error(String(e))); },
+    );
+  });
+}
+
+/** Daftar printer sistem via webContents sementara (tidak perlu halaman termuat). */
+async function listPrinters(): Promise<PrinterLite[]> {
+  const win = new BrowserWindow({ show: false, width: 10, height: 10, skipTaskbar: true });
+  try {
+    const info = await withTimeout(win.webContents.getPrintersAsync(), 15000, 'Gagal membaca daftar printer.');
+    return info.map((p) => ({
+      name: p.name,
+      displayName: p.displayName || p.name,
+      description: p.description ?? '',
+    }));
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+/** Gabungkan setting 'receipt_printer' + pilihan sesi renderer → opsi cetak. */
+async function resolveDevice(db: DB, sessionChoice?: string): Promise<PrintDeviceResolution> {
+  const setting = settingsRepo.getSetting(db, 'receipt_printer', '');
+  const printers = await listPrinters();
+  return resolvePrintDevice(setting, printers, sessionChoice);
+}
+
+/** Pesan sukses cetak untuk toast renderer. */
+function printOkMessage(what: string, device: PrintDeviceResolution): string {
+  const base = device.useDialog
+    ? `${what} — dialog print dibuka, silakan pilih printer.`
+    : `${what} dikirim ke ${device.deviceName || 'printer default sistem'}.`;
+  return device.notice ? `${base} ${device.notice}` : base;
+}
+
+const PRINT_TIMEOUT_MS = 90_000;
+
+/**
+ * Cetak HTML via window khusus (v1.0.3).
+ * - silent  : window tersembunyi + print langsung ke deviceName (POS-style, tanpa dialog).
+ * - dialog  : window dibuat TERLIHAT (kecil, tanpa taskbar, pojok kanan-bawah) — dialog print
+ *             GTK di Linux/Wayland tidak muncul dari window tersembunyi (bug lama v1.0.1).
+ * - Callback print selalu diperiksa (success, failureReason) → error sampai ke renderer.
+ * - Timeout guard: window SELALU di-destroy; tidak ada lagi window tersembunyi menumpuk.
+ */
+async function printHtml(html: string, device: PrintDeviceResolution): Promise<void> {
+  const dialogMode = device.useDialog;
+  const win = new BrowserWindow({
+    show: dialogMode,
+    width: dialogMode ? 260 : 300,
+    height: dialogMode ? 220 : 600,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+  });
   win.setMenuBarVisibility(false);
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  await new Promise<void>((resolve) => {
-    win.webContents.once('did-finish-load', () => resolve());
-  });
-  await new Promise<void>((resolve) => {
-    win.webContents.print({ silent: false, printBackground: true }, () => resolve());
-  });
-  win.destroy();
+  if (dialogMode) {
+    // Taruh di pojok kanan-bawah agar tidak menutupi UI kasir.
+    try {
+      const area = screen.getPrimaryDisplay().workArea;
+      win.setPosition(area.x + area.width - 280, area.y + area.height - 260);
+    } catch {
+      // posisi default bila screen tidak tersedia
+    }
+  }
+
+  try {
+    // Muat HTML — settle di event mana pun yang datang lebih dulu (loadURL vs did-finish-load).
+    const loaded = new Promise<void>((resolve, reject) => {
+      win.webContents.once('did-finish-load', () => resolve());
+      win.webContents.once('did-fail-load', (_e, code, desc) =>
+        reject(new Error(`Gagal memuat halaman cetak (${code}: ${desc})`)));
+      win
+        .loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+        .then(() => resolve(), (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))));
+    });
+    await withTimeout(loaded, 30_000, 'Waktu tunggu muat halaman cetak habis (30 detik).');
+    await delay(200); // beri waktu layout stabil sebelum print
+
+    const printed = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (err?: Error): void => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve();
+      };
+      const timer = setTimeout(
+        () => finish(new Error('Waktu tunggu proses cetak habis (90 detik).')),
+        PRINT_TIMEOUT_MS,
+      );
+      try {
+        win.webContents.print(
+          {
+            silent: device.silent,
+            deviceName: device.deviceName,
+            printBackground: true,
+            ...(device.silent ? { stayHidden: true } : {}),
+          },
+          (success, failureReason) => {
+            clearTimeout(timer);
+            if (success) return finish();
+            if (/cancel/i.test(failureReason ?? '')) return finish(); // user batal → bukan error
+            finish(new Error(`Cetak gagal: ${failureReason || 'alasan tidak diketahui'}`));
+          },
+        );
+      } catch (err) {
+        clearTimeout(timer);
+        finish(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+    await printed;
+  } finally {
+    // Beri waktu spooler mengambil job sebelum window dibunuh (mode silent).
+    if (!dialogMode) await delay(400);
+    if (!win.isDestroyed()) win.destroy();
+  }
 }
 
 function dashboardCards(db: DB): DashboardCards {
@@ -240,9 +356,11 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle('categories:delete', (_e, id: string) => categoriesRepo.deleteCategory(db, id));
 
   // ---------- Label barcode (HTML dari renderer, SVG Code 128 sudah jadi) ----------
-  ipcMain.handle('labels:print', async (_e, html: string, labelCount: number) => {
-    await printHtml(html);
+  ipcMain.handle('labels:print', async (_e, html: string, labelCount: number, deviceChoice?: string) => {
+    const device = await resolveDevice(db, deviceChoice);
+    await printHtml(html, device);
     log.info(`Label dicetak: ${labelCount} label`);
+    return printOkMessage(`${labelCount} label`, device);
   });
 
   // ---------- Siswa & absensi ----------
@@ -318,7 +436,7 @@ export function registerIpc(ctx: IpcContext): void {
       .all(transactionId) as ReceiptItemLine[];
     return items;
   });
-  ipcMain.handle('receipts:print', async (_e, transactionId: string) => {
+  ipcMain.handle('receipts:print', async (_e, transactionId: string, deviceChoice?: string) => {
     const tx = db
       .prepare('SELECT code, total, item_count, sold_at FROM transactions WHERE id = ?')
       .get(transactionId) as { code: string; total: number; item_count: number; sold_at: string } | undefined;
@@ -341,8 +459,30 @@ export function registerIpc(ctx: IpcContext): void {
       logoDataUri: logoDataUri(),
       widthMm: Number(settingsRepo.getSetting(db, 'receipt_width_mm', '58')) || 58,
     };
-    await printHtml(buildReceiptHtml(data));
+    const device = await resolveDevice(db, deviceChoice);
+    await printHtml(buildReceiptHtml(data), device);
     log.info(`Struk dicetak: ${tx.code} (${data.widthMm}mm)`);
+    return printOkMessage(`Struk ${tx.code}`, device);
+  });
+
+  // ---------- Printer & tes cetak (v1.0.3) ----------
+  ipcMain.handle('printers:list', () => listPrinters());
+  ipcMain.handle('receipts:testPrint', async (_e, deviceChoice?: string) => {
+    const device = await resolveDevice(db, deviceChoice);
+    const data: ReceiptData = {
+      storeName: settingsRepo.getSetting(db, 'store_name', 'GreenMart'),
+      code: 'TES-CETAK',
+      soldAt: toIsoLocal(),
+      items: [{ name: 'Tes cetak — printer OK ✓', qty: 1, price: 0, subtotal: 0 }],
+      total: 0,
+      itemCount: 1,
+      cashiers: [],
+      logoDataUri: logoDataUri(),
+      widthMm: Number(settingsRepo.getSetting(db, 'receipt_width_mm', '58')) || 58,
+    };
+    await printHtml(buildReceiptHtml(data), device);
+    log.info(`Tes cetak dikirim (${device.useDialog ? 'dialog print' : device.deviceName || 'printer default'})`);
+    return printOkMessage('Halaman tes cetak', device);
   });
 
   // ---------- Dashboard ----------
